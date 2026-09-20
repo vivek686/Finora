@@ -1,0 +1,1745 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Finora — Understand your money. Decide what's next.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          // Friendly consumer-fintech palette — soft neutrals + a single
+          // confident indigo accent, rather than a dark "terminal" look.
+          canvas: '#F4F5FA',
+          surface: '#FFFFFF',
+          surface2: '#F8F9FD',
+          line: '#E7E9F2',
+          ink: { 900:'#171A2B', 700:'#3A3F58', 500:'#6B7089', 400:'#8D92A8' },
+          brand: { 50:'#EEF0FF', 100:'#E0E4FF', 400:'#7B84F2', 500:'#5B63E8', 600:'#4A51D1', 700:'#3B41A8' },
+          good: { 50:'#EAFBF3', 500:'#12B76A', 600:'#0D9457' },
+          warn: { 50:'#FFF8EB', 500:'#F79009', 600:'#B96A05' },
+          bad: { 50:'#FEF1F1', 500:'#F04438', 600:'#C4291E' },
+          info: { 50:'#EFF6FF', 500:'#3B82F6' },
+        },
+        fontFamily: {
+          sans: ['"Plus Jakarta Sans"','system-ui','sans-serif'],
+        },
+        boxShadow: {
+          card: '0 1px 2px rgba(23,26,43,0.04), 0 8px 24px -12px rgba(23,26,43,0.10)',
+          pop: '0 8px 30px -8px rgba(91,99,232,0.35)',
+        },
+        borderRadius: { xl2: '1.25rem' },
+      },
+    },
+  };
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  html, body, #root { height: 100%; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body { margin:0; background:#EEF0F7; color:#171A2B; font-family:'Plus Jakarta Sans',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  .num { font-variant-numeric: tabular-nums; font-feature-settings:'tnum' 1; }
+  ::selection { background: rgba(91,99,232,0.18); }
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:#D6D9E8; border-radius:4px; }
+  ::-webkit-scrollbar-thumb:hover { background:#C1C5DB; }
+  @keyframes pulse-dot { 0%,100%{opacity:.35} 50%{opacity:1} }
+  .pulse-dot { animation: pulse-dot 1.2s ease-in-out infinite; }
+  @keyframes fade-in { from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:translateY(0)} }
+  .fade-in { animation: fade-in .3s ease-out; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { animation: spin 0.9s linear infinite; }
+  @media (prefers-reduced-motion: reduce) { .pulse-dot,.fade-in,.spin { animation:none; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useReducer, useContext, useCallback, useMemo, useRef, createContext } = React;
+
+// ═════════════════════════════════════════════════════════════════
+// DATA — category rules + fictional demo dataset (all sample data is
+// clearly fictional, generated for demo purposes only)
+// ═════════════════════════════════════════════════════════════════
+
+const CATEGORIES = ['Food','Shopping','Transport','Bills','Rent','Entertainment','Healthcare','Education','Subscriptions','Travel','Income','Other'];
+
+const CATEGORY_KEYWORDS = {
+  Food: ['swiggy','zomato','restaurant','cafe','coffee','dominos','pizza','starbucks','mcdonald','kfc','burger','dine','eatery','food court','grocery','bigbasket','blinkit','zepto','dmart','supermarket'],
+  Shopping: ['amazon','flipkart','myntra','ajio','mall','store','retail','shopping','nykaa','decathlon','ikea','reliance trends','h&m','zara'],
+  Transport: ['uber','ola','rapido','metro','petrol','fuel','parking','toll','indian oil','hp petrol','irctc','railway','cab','auto'],
+  Bills: ['electricity','water bill','gas bill','broadband','wifi','airtel','jio','vodafone','bses','utility','piped gas','dth','mobile recharge'],
+  Rent: ['rent','landlord','housing society','lease'],
+  Entertainment: ['bookmyshow','pvr','inox','movie','cinema','concert','gaming','steam','playstation','event'],
+  Healthcare: ['pharmacy','apollo','hospital','clinic','doctor','medplus','medical','diagnostic','lab test','practo','health insurance','dental'],
+  Education: ['udemy','coursera','tuition','school fee','college','university','byju','unacademy','exam fee','books'],
+  Subscriptions: ['netflix','spotify','prime video','hotstar','youtube premium','gym','fitness','cult.fit','icloud','google one','adobe','notion','chatgpt','openai','subscription'],
+  Travel: ['makemytrip','goibibo','airbnb','oyo','hotel','flight','indigo','airlines','vistara','travel','trip'],
+  Income: ['salary','payroll','credited','interest earned','refund','bonus','stipend'],
+  Other: [],
+};
+
+const TYPICAL_RANGE = {
+  Food:[150,3500], Shopping:[300,5000], Transport:[50,1500], Bills:[300,4000],
+  Entertainment:[150,2500], Healthcare:[200,6000], Education:[200,8000],
+  Subscriptions:[99,1500], Travel:[500,15000], Other:[50,3000],
+};
+
+let _seed = 0;
+function nextId(prefix) { _seed += 1; return `${prefix}-${_seed}-${Date.now().toString(36)}`; }
+function iso(d) { return d.toISOString().slice(0,10); }
+function daysAgo(n) { const d = new Date(); d.setDate(d.getDate()-n); return d; }
+
+function generateDemoTransactions() {
+  const rows = [];
+  const push = (daysBack, description, amount, type, merchant) => {
+    rows.push({ id: nextId('demo'), date: iso(daysAgo(daysBack)), description, amount, type, merchant });
+  };
+  push(3,'Salary credited - September',60000,'credit','Employer Payroll');
+  push(33,'Salary credited - August',60000,'credit','Employer Payroll');
+  push(2,'Rent payment to landlord',15000,'debit','Landlord - Housing Society');
+  push(32,'Rent payment to landlord',15000,'debit','Landlord - Housing Society');
+  push(1,'Netflix monthly subscription',499,'debit','Netflix');
+  push(31,'Netflix monthly subscription',499,'debit','Netflix');
+  push(5,'Spotify Premium',119,'debit','Spotify');
+  push(35,'Spotify Premium',119,'debit','Spotify');
+  push(4,'Cult.fit gym membership',1399,'debit','Cult.fit');
+  push(34,'Cult.fit gym membership',1399,'debit','Cult.fit');
+  push(8,'Electricity bill - BSES',1850,'debit','BSES Electricity');
+  push(38,'Electricity bill - BSES',1620,'debit','BSES Electricity');
+  push(10,'Airtel broadband bill',999,'debit','Airtel Broadband');
+  push(40,'Airtel broadband bill',999,'debit','Airtel Broadband');
+  push(6,'Jio mobile recharge',479,'debit','Jio');
+  push(36,'Jio mobile recharge',479,'debit','Jio');
+  const foodItems = [
+    [1,'Swiggy order - dinner',420,'Swiggy'],[2,'BigBasket grocery run',2350,'BigBasket'],
+    [4,'Zomato order - lunch',310,'Zomato'],[6,'Cafe Coffee Day',260,'Cafe Coffee Day'],
+    [7,'Dominos pizza night',780,"Domino's"],[9,'Blinkit quick grocery',640,'Blinkit'],
+    [11,'Swiggy order - dinner',390,'Swiggy'],[13,'Starbucks coffee',480,'Starbucks'],
+    [15,'DMart grocery shopping',3100,'DMart'],[17,'Zomato order - lunch',290,'Zomato'],
+    [19,'Restaurant dinner with friends',1650,'The Fork & Vine'],[21,'Swiggy order',350,'Swiggy'],
+    [23,'Zepto grocery',720,'Zepto'],[26,'Food court - mall',560,'Food Court'],
+    [28,'BigBasket grocery run',2200,'BigBasket'],[31,'Swiggy order - dinner',410,'Swiggy'],
+    [33,'DMart grocery shopping',2950,'DMart'],[37,'Zomato order',340,'Zomato'],
+    [41,'Cafe Coffee Day',240,'Cafe Coffee Day'],[45,'Dominos pizza night',820,"Domino's"],
+  ];
+  foodItems.forEach(([d,desc,amt,m]) => push(d,desc,amt,'debit',m));
+  push(3,'Amazon order - home essentials',1450,'debit','Amazon');
+  push(23,'Myntra clothing order',2200,'debit','Myntra');
+  push(16,'Flipkart order - electronics accessory',1899,'debit','Flipkart');
+  push(20,'Ajio order',1350,'debit','Ajio');
+  push(24,'Amazon order - unusually large electronics purchase',12400,'debit','Amazon');
+  push(27,'Nykaa beauty order',980,'debit','Nykaa');
+  push(43,'Decathlon sports gear',2650,'debit','Decathlon');
+  const transportItems = [
+    [1,'Uber ride',240,'Uber'],[3,'Petrol refill',1200,'Indian Oil'],[7,'Ola ride',180,'Ola'],
+    [14,'Metro card recharge',500,'Delhi Metro'],[18,'Uber ride',320,'Uber'],
+    [24,'Petrol refill',1150,'Indian Oil'],[29,'Parking fee',100,'Parking'],
+    [39,'Uber ride',260,'Uber'],[44,'Metro card recharge',500,'Delhi Metro'],
+  ];
+  transportItems.forEach(([d,desc,amt,m]) => push(d,desc,amt,'debit',m));
+  push(5,'BookMyShow movie tickets',700,'debit','BookMyShow');
+  push(22,'PVR cinema outing',850,'debit','PVR');
+  push(42,'BookMyShow concert tickets',1600,'debit','BookMyShow');
+  push(15,'Apollo Pharmacy purchase',640,'debit','Apollo Pharmacy');
+  push(46,'Doctor consultation',800,'debit','Practo Clinic');
+  push(25,'MakeMyTrip weekend getaway booking',6200,'debit','MakeMyTrip');
+  return rows;
+}
+
+const DEMO_PROFILE = {
+  income: 60000, balance: 42000, monthlyBudget: 45000,
+  categoryBudgets: { Food:9000, Shopping:7000, Transport:3000, Bills:4000, Rent:15000, Entertainment:2500, Healthcare:2000, Subscriptions:2200, Travel:4000, Other:1500 },
+  goal: { name:'Emergency fund', amount:50000, deadlineMonths:4, startDate: iso(daysAgo(33)), savedSoFar:12500 },
+};
+
+function unexpectedExpenseTransaction() {
+  return { id: nextId('demo'), date: iso(new Date()), description:'Emergency car repair - unexpected', amount:4000, type:'debit', merchant:'City Auto Garage' };
+}
+
+// Simulated "connect email" sync — represents transactional receipts an
+// email-scanning integration would find (order confirmations, payment
+// receipts). In production this would come from a real Gmail/Outlook API
+// integration reading transactional emails; here it's a fixed fictional
+// dataset so the demo works with zero external accounts.
+function generateEmailSyncTransactions() {
+  const rows = [];
+  const push = (daysBack, description, amount, type, merchant) => {
+    rows.push({ id: nextId('mail'), date: iso(daysAgo(daysBack)), description, amount, type, merchant });
+  };
+  push(2,'Salary credited (payslip email)',60000,'credit','Employer Payroll');
+  push(1,'Rent payment receipt',15000,'debit','Landlord - Housing Society');
+  push(3,'Netflix payment receipt',499,'debit','Netflix');
+  push(6,'Spotify payment receipt',119,'debit','Spotify');
+  push(4,'Amazon.in order confirmation',1899,'debit','Amazon');
+  push(9,'Swiggy order receipt',380,'debit','Swiggy');
+  push(11,'Uber trip receipt',290,'debit','Uber');
+  push(14,'Electricity bill payment confirmation',1780,'debit','BSES Electricity');
+  push(17,'Zomato order receipt',340,'debit','Zomato');
+  push(19,'Flipkart order confirmation',2650,'debit','Flipkart');
+  push(22,'Airtel bill payment receipt',999,'debit','Airtel Broadband');
+  push(26,'BookMyShow booking confirmation',700,'debit','BookMyShow');
+  push(29,'Cult.fit membership receipt',1399,'debit','Cult.fit');
+  push(33,'BigBasket order receipt',2100,'debit','BigBasket');
+  push(38,'MakeMyTrip booking confirmation',5400,'debit','MakeMyTrip');
+  return rows;
+}
+
+// ═════════════════════════════════════════════════════════════════
+// FORMAT HELPERS
+// ═════════════════════════════════════════════════════════════════
+function inr(amount) {
+  const r = Math.round(amount); const sign = r < 0 ? '-' : '';
+  return `${sign}₹${Math.abs(r).toLocaleString('en-IN')}`;
+}
+function pct(n) { return `${Math.round(n)}%`; }
+function formatDate(isoStr) { return new Date(isoStr).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }); }
+function relativeDays(days) {
+  if (days < 0) return `${Math.abs(days)} day${Math.abs(days)===1?'':'s'} overdue`;
+  if (days === 0) return 'due today';
+  if (days === 1) return 'due tomorrow';
+  return `in ${days} days`;
+}
+</script>
+<script type="text/babel" data-presets="react">
+
+// ═════════════════════════════════════════════════════════════════
+// TOOL 2 — Expense Categorizer (hybrid keyword rules + heuristics)
+// ═════════════════════════════════════════════════════════════════
+function categorizeTransaction(description, merchant, type) {
+  const text = `${description} ${merchant || ''}`.toLowerCase();
+  if (type === 'credit') {
+    for (const kw of CATEGORY_KEYWORDS.Income) {
+      if (text.includes(kw)) return { category:'Income', confidence:0.95, reason:`Matched income keyword "${kw}".` };
+    }
+    return { category:'Income', confidence:0.6, reason:'Credited transaction, treated as income by default.' };
+  }
+  let best = null;
+  Object.keys(CATEGORY_KEYWORDS).forEach((cat) => {
+    if (cat === 'Income') return;
+    for (const kw of CATEGORY_KEYWORDS[cat]) {
+      if (text.includes(kw)) {
+        const score = kw.length;
+        if (!best || score > best.score) best = { category: cat, score, matched: kw };
+      }
+    }
+  });
+  if (best) return { category: best.category, confidence:0.9, reason:`Matched keyword "${best.matched}" in "${description}".` };
+  if (/\bemi\b|loan|installment/.test(text)) return { category:'Bills', confidence:0.6, reason:'Description suggests a loan/EMI installment.' };
+  if (/insurance|premium/.test(text)) return { category:'Bills', confidence:0.55, reason:'Description mentions insurance/premium.' };
+  if (/transfer|upi|imps|neft/.test(text)) return { category:'Other', confidence:0.35, reason:'Generic transfer with no further detail.' };
+  return { category:'Other', confidence:0.3, reason:'No matching category rule found for this description.' };
+}
+
+// ═════════════════════════════════════════════════════════════════
+// TOOL 1 — Transaction Analyzer
+// ═════════════════════════════════════════════════════════════════
+function analyzeTransactions(transactions, opts) {
+  opts = opts || {};
+  let txns = transactions;
+  if (opts.category) txns = txns.filter(t => t.category === opts.category);
+  if (opts.from) txns = txns.filter(t => t.date >= opts.from);
+  if (opts.to) txns = txns.filter(t => t.date <= opts.to);
+  const totalIncome = txns.filter(t=>t.type==='credit').reduce((s,t)=>s+t.amount,0);
+  const totalExpenses = txns.filter(t=>t.type==='debit').reduce((s,t)=>s+t.amount,0);
+  const categoryTotals = {};
+  txns.filter(t=>t.type==='debit').forEach(t => { categoryTotals[t.category] = (categoryTotals[t.category]||0) + t.amount; });
+  const dates = txns.map(t=>t.date).sort();
+  const periodStart = dates[0] || null, periodEnd = dates[dates.length-1] || null;
+  let avgDailySpend = 0, avgMonthlySpend = 0;
+  if (periodStart && periodEnd) {
+    const days = Math.max(1, Math.round((new Date(periodEnd)-new Date(periodStart))/86400000)+1);
+    avgDailySpend = totalExpenses/days; avgMonthlySpend = avgDailySpend*30;
+  }
+  return { totalIncome, totalExpenses, netCashFlow: totalIncome-totalExpenses, categoryTotals,
+    avgDailySpend: Math.round(avgDailySpend*100)/100, avgMonthlySpend: Math.round(avgMonthlySpend*100)/100,
+    periodStart, periodEnd, transactionCount: txns.length };
+}
+function analyzeCurrentMonth(transactions) {
+  const now = new Date();
+  const from = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+  return analyzeTransactions(transactions, { from });
+}
+function analyzePreviousMonth(transactions) {
+  const now = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const from = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-01`;
+  const lastDay = new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+  const to = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+  return analyzeTransactions(transactions, { from, to });
+}
+
+// ═════════════════════════════════════════════════════════════════
+// TOOL 3 — Recurring Payment Detector
+// ═════════════════════════════════════════════════════════════════
+function detectRecurringPayments(transactions) {
+  const debits = transactions.filter(t=>t.type==='debit');
+  const groups = new Map();
+  debits.forEach(t => {
+    const key = (t.merchant || t.description).trim().toLowerCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  });
+  const results = [];
+  groups.forEach((txns) => {
+    if (txns.length < 2) return;
+    const sorted = [...txns].sort((a,b)=>a.date.localeCompare(b.date));
+    const amounts = sorted.map(t=>t.amount);
+    const avgAmount = amounts.reduce((s,a)=>s+a,0)/amounts.length;
+    const amountVariance = Math.max(...amounts) - Math.min(...amounts);
+    const amountStable = amountVariance <= avgAmount * 0.12;
+    const gaps = [];
+    for (let i=1;i<sorted.length;i++) gaps.push(Math.round((new Date(sorted[i].date)-new Date(sorted[i-1].date))/86400000));
+    const avgGap = gaps.reduce((s,g)=>s+g,0)/gaps.length;
+    const gapConsistent = gaps.every(g => Math.abs(g-avgGap) <= 4);
+    let frequency = 'irregular';
+    if (avgGap>=5 && avgGap<=9) frequency='weekly';
+    else if (avgGap>=27 && avgGap<=33) frequency='monthly';
+    else if (avgGap>=350 && avgGap<=380) frequency='yearly';
+    const volatile = new Set(['Food','Transport','Shopping','Entertainment']);
+    const minOcc = volatile.has(sorted[0].category) ? 3 : 2;
+    if (!amountStable || !gapConsistent || frequency==='irregular' || sorted.length < minOcc) return;
+    const last = sorted[sorted.length-1];
+    const nextExpected = new Date(last.date);
+    if (frequency==='weekly') nextExpected.setDate(nextExpected.getDate()+7);
+    if (frequency==='monthly') nextExpected.setDate(nextExpected.getDate()+30);
+    if (frequency==='yearly') nextExpected.setFullYear(nextExpected.getFullYear()+1);
+    results.push({ merchant: last.merchant || last.description, amount: Math.round(avgAmount), frequency,
+      occurrences: sorted.length, lastDate: last.date, nextExpected: iso(nextExpected), category: last.category });
+  });
+  return results.sort((a,b)=>b.amount-a.amount);
+}
+
+// ═════════════════════════════════════════════════════════════════
+// TOOL 4 — Anomaly Detector (Tukey fence, never narrower than default)
+// ═════════════════════════════════════════════════════════════════
+function percentileOf(sorted, p) {
+  if (!sorted.length) return 0;
+  const idx = p*(sorted.length-1), lo=Math.floor(idx), hi=Math.ceil(idx);
+  if (lo===hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi]-sorted[lo])*(idx-lo);
+}
+function detectAnomalies(transactions) {
+  const debits = transactions.filter(t=>t.type==='debit');
+  const byCategory = new Map();
+  debits.forEach(t => { if(!byCategory.has(t.category)) byCategory.set(t.category, []); byCategory.get(t.category).push(t.amount); });
+  const anomalies = [];
+  debits.forEach(t => {
+    const observed = byCategory.get(t.category) || [];
+    const defaultRange = TYPICAL_RANGE[t.category] || [0, Number.MAX_SAFE_INTEGER];
+    let upperBound = defaultRange[1];
+    if (observed.length >= 4) {
+      const sorted = [...observed].sort((a,b)=>a-b);
+      const q1 = percentileOf(sorted,0.25), q3 = percentileOf(sorted,0.75);
+      const fence = q3 + 1.5*(q3-q1);
+      upperBound = Math.max(defaultRange[1], fence);
+    }
+    if (t.amount > upperBound) {
+      anomalies.push({ transactionId: t.id, description: t.description, amount: t.amount, category: t.category,
+        typicalRange: [defaultRange[0], upperBound],
+        message: `Unusual spending pattern detected: ₹${t.amount.toLocaleString('en-IN')} on "${t.description}" is notably higher than your typical ${t.category} spending (usually under ₹${Math.round(upperBound).toLocaleString('en-IN')}).` });
+    }
+  });
+  return anomalies;
+}
+
+// ═════════════════════════════════════════════════════════════════
+// TOOL 5 — Budget Analyzer
+// ═════════════════════════════════════════════════════════════════
+function analyzeBudget(transactions, profile) {
+  const { categoryTotals } = analyzeCurrentMonth(transactions);
+  const cats = new Set([...Object.keys(profile.categoryBudgets), ...Object.keys(categoryTotals)]);
+  cats.delete('Income');
+  const lines = [];
+  cats.forEach(cat => {
+    const budget = profile.categoryBudgets[cat] || 0;
+    const actual = categoryTotals[cat] || 0;
+    const diff = budget - actual;
+    const pctUsed = budget>0 ? Math.round((actual/budget)*100) : (actual>0 ? 999 : 0);
+    let status = 'under';
+    if (pctUsed > 100) status = 'over'; else if (pctUsed >= 80) status = 'near';
+    lines.push({ category: cat, budget, actual, diff, pctUsed, status });
+  });
+  return lines.sort((a,b)=>b.pctUsed-a.pctUsed);
+}
+function totalBudgetSummary(transactions, profile) {
+  const { totalExpenses } = analyzeCurrentMonth(transactions);
+  const remaining = profile.monthlyBudget - totalExpenses;
+  const pctUsed = profile.monthlyBudget>0 ? Math.round((totalExpenses/profile.monthlyBudget)*100) : 0;
+  return { budget: profile.monthlyBudget, actual: totalExpenses, remaining, pctUsed,
+    status: pctUsed>100 ? 'over' : pctUsed>=80 ? 'near' : 'under' };
+}
+
+// ═════════════════════════════════════════════════════════════════
+// TOOL 6 — Upcoming Obligation Analyzer
+// ═════════════════════════════════════════════════════════════════
+function analyzeObligations(recurring, lookaheadDays) {
+  lookaheadDays = lookaheadDays === undefined ? 30 : lookaheadDays;
+  const today = new Date(); today.setHours(0,0,0,0);
+  return recurring.map(r => {
+    const due = new Date(r.nextExpected);
+    const daysRemaining = Math.round((due-today)/86400000);
+    let status = 'upcoming';
+    if (daysRemaining < 0) status = 'overdue'; else if (daysRemaining <= 5) status = 'due-soon';
+    return { id:`obl-${r.merchant}-${r.nextExpected}`, name:r.merchant, amount:r.amount, dueDate:r.nextExpected, daysRemaining, status, source:'recurring' };
+  }).filter(o => o.daysRemaining <= lookaheadDays).sort((a,b)=>a.daysRemaining-b.daysRemaining);
+}
+function totalUpcomingAmount(obligations) { return obligations.reduce((s,o)=>s+o.amount,0); }
+
+// ═════════════════════════════════════════════════════════════════
+// TOOL 7 — Goal Progress Calculator
+// ═════════════════════════════════════════════════════════════════
+function calculateGoalProgress(transactions, profile) {
+  if (!profile.goal) return null;
+  const { name, amount, deadlineMonths, savedSoFar } = profile.goal;
+  const remaining = Math.max(0, amount - savedSoFar);
+  const requiredMonthlySaving = deadlineMonths>0 ? Math.round(remaining/deadlineMonths) : remaining;
+  const { totalIncome, totalExpenses } = analyzeCurrentMonth(transactions);
+  const currentMonthNetSaving = (totalIncome>0 || totalExpenses>0) ? totalIncome-totalExpenses : profile.income-profile.monthlyBudget;
+  const gapPerMonth = requiredMonthlySaving - currentMonthNetSaving;
+  return { goalName:name, targetAmount:amount, savedSoFar, progressPct: amount>0?Math.round((savedSoFar/amount)*100):0,
+    monthsRemaining:deadlineMonths, requiredMonthlySaving, currentMonthNetSaving:Math.round(currentMonthNetSaving),
+    onTrack: currentMonthNetSaving >= requiredMonthlySaving, gapPerMonth: Math.round(gapPerMonth) };
+}
+
+// ═════════════════════════════════════════════════════════════════
+// TOOL 8 — Spending Impact Calculator
+// ═════════════════════════════════════════════════════════════════
+function calculateSpendingImpact(proposedAmount, transactions, profile, obligations) {
+  const budgetSummary = totalBudgetSummary(transactions, profile);
+  const remainingBudgetBefore = budgetSummary.remaining;
+  const remainingBudgetAfter = remainingBudgetBefore - proposedAmount;
+  const availableCashBefore = profile.balance;
+  const availableCashAfter = availableCashBefore - proposedAmount;
+  const upcomingObligationsTotal = totalUpcomingAmount(obligations);
+  const cashLeftAfterObligations = availableCashAfter - upcomingObligationsTotal;
+  const goalBefore = calculateGoalProgress(transactions, profile);
+  const hypotheticalTxn = { id:'hypothetical', date: iso(new Date()), description:'Proposed expense (hypothetical)', amount:proposedAmount, type:'debit', category:'Other', categoryConfidence:1, categoryReason:'Hypothetical spending-impact simulation.' };
+  const goalAfter = goalBefore ? calculateGoalProgress([...transactions, hypotheticalTxn], profile) : null;
+  const wouldExceedBudget = remainingBudgetAfter < 0;
+  const wouldBreakObligations = cashLeftAfterObligations < 0;
+  const wouldMissGoalPace = !!goalAfter && goalAfter.gapPerMonth > (goalBefore ? goalBefore.gapPerMonth : 0);
+  let verdict = 'affordable';
+  if (wouldBreakObligations || wouldExceedBudget) verdict = 'risky';
+  else if (wouldMissGoalPace || remainingBudgetAfter < remainingBudgetBefore*0.15) verdict = 'tight';
+  return { proposedAmount, remainingBudgetBefore, remainingBudgetAfter, availableCashBefore, availableCashAfter,
+    upcomingObligationsTotal, cashLeftAfterObligations,
+    projectedSavingsBefore: goalBefore ? goalBefore.currentMonthNetSaving : null,
+    projectedSavingsAfter: goalAfter ? goalAfter.currentMonthNetSaving - proposedAmount : null,
+    requiredMonthlySaving: goalBefore ? goalBefore.requiredMonthlySaving : null,
+    wouldExceedBudget, wouldBreakObligations, wouldMissGoalPace, verdict };
+}
+
+// ═════════════════════════════════════════════════════════════════
+// Insight generator (combines tools for the dashboard AI Insights panel)
+// ═════════════════════════════════════════════════════════════════
+function generateInsights(transactions, profile) {
+  const insights = []; const now = new Date().toISOString();
+  const current = analyzeCurrentMonth(transactions), previous = analyzePreviousMonth(transactions);
+  if (previous.transactionCount > 0) {
+    ['Shopping','Food','Entertainment','Travel'].forEach(cat => {
+      const curAmt = current.categoryTotals[cat]||0, prevAmt = previous.categoryTotals[cat]||0;
+      if (prevAmt>0 && curAmt>0) {
+        const change = Math.round(((curAmt-prevAmt)/prevAmt)*100);
+        if (Math.abs(change) >= 20) insights.push({ id:nextId('insight'), text:`${cat} spending ${change>0?'increased':'decreased'} ${Math.abs(change)}% compared with last month (${inr(prevAmt)} → ${inr(curAmt)}).`, kind: change>0?'warning':'positive', createdAt:now });
+      }
+    });
+  }
+  const recurring = detectRecurringPayments(transactions);
+  const subTotal = recurring.filter(r=>r.category==='Subscriptions').reduce((s,r)=>s+r.amount,0);
+  if (subTotal>0) insights.push({ id:nextId('insight'), text:`${inr(subTotal)} in recurring subscriptions detected across ${recurring.filter(r=>r.category==='Subscriptions').length} services.`, kind:'neutral', createdAt:now });
+  const obligations = analyzeObligations(recurring, 7);
+  const soon = obligations.filter(o=>o.status==='due-soon'||o.status==='overdue');
+  if (soon.length) { const nearest = soon[0]; insights.push({ id:nextId('insight'), text:`Your ${nearest.name} payment of ${inr(nearest.amount)} is ${relativeDays(nearest.daysRemaining)}.`, kind: nearest.status==='overdue'?'warning':'neutral', createdAt:now }); }
+  const budgetLines = analyzeBudget(transactions, profile);
+  const overBudget = budgetLines.filter(b=>b.status==='over');
+  if (overBudget.length) insights.push({ id:nextId('insight'), text:`You're over budget in ${overBudget.length} categor${overBudget.length>1?'ies':'y'}: ${overBudget.map(b=>`${b.category} (${pct(b.pctUsed)})`).join(', ')}.`, kind:'warning', createdAt:now });
+  const anomalies = detectAnomalies(transactions);
+  if (anomalies.length) { const top = [...anomalies].sort((a,b)=>b.amount-a.amount)[0]; insights.push({ id:nextId('insight'), text:`${anomalies.length} unusual spending pattern${anomalies.length>1?'s':''} detected — largest was ${inr(top.amount)} on ${top.description}.`, kind:'warning', createdAt:now }); }
+  const goal = calculateGoalProgress(transactions, profile);
+  if (goal) insights.push({ id:nextId('insight'), text: goal.onTrack ? `You're on track for "${goal.goalName}" — projected net saving of ${inr(goal.currentMonthNetSaving)} meets the ${inr(goal.requiredMonthlySaving)}/month pace needed.` : `Projected savings pace is ${inr(Math.abs(goal.gapPerMonth))} short of what "${goal.goalName}" needs per month to stay on schedule.`, kind: goal.onTrack?'positive':'warning', createdAt:now });
+  return insights.slice(0,5);
+}
+</script>
+<script type="text/babel" data-presets="react">
+
+// ═════════════════════════════════════════════════════════════════
+// DATA LAYER — CSV parsing & validation
+// ═════════════════════════════════════════════════════════════════
+function normalizeHeader(h) { return h.trim().toLowerCase(); }
+function findKey(row, candidates) {
+  const keys = Object.keys(row);
+  for (const c of candidates) { const m = keys.find(k => normalizeHeader(k)===c); if (m) return m; }
+  return null;
+}
+function parseDateStr(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const m = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (m) {
+    const [, d, mo, y] = m;
+    const year = y.length===2 ? `20${y}` : y;
+    const dayNum = parseInt(d,10), monthNum = parseInt(mo,10);
+    if (monthNum>=1 && monthNum<=12 && dayNum>=1 && dayNum<=31) {
+      const c = new Date(`${year}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`);
+      if (!isNaN(c.getTime())) return iso(c);
+    }
+  }
+  const native = new Date(trimmed);
+  if (!isNaN(native.getTime())) return iso(native);
+  return null;
+}
+function parseAmountAndType(raw, explicitType) {
+  const cleaned = raw.replace(/[₹,\s]/g,''); const num = parseFloat(cleaned);
+  if (isNaN(num)) return null;
+  if (explicitType) {
+    const t = explicitType.trim().toLowerCase();
+    if (t.startsWith('cr') || t==='credit' || t==='income') return { amount: Math.abs(num), type:'credit' };
+    if (t.startsWith('de') || t==='debit' || t==='expense') return { amount: Math.abs(num), type:'debit' };
+  }
+  return num < 0 ? { amount: Math.abs(num), type:'debit' } : { amount: Math.abs(num), type:'credit' };
+}
+function parseTransactionsCsv(csvText) {
+  const errors = [];
+  const result = Papa.parse(csvText, { header:true, skipEmptyLines:true });
+  if (result.errors.length) result.errors.forEach(e => errors.push({ row:(e.row||0)+2, message:e.message }));
+  const rows = result.data;
+  if (!rows.length) return { transactions:[], errors:[{row:0,message:'The file has no data rows.'}], duplicatesSkipped:0, rowsRead:0 };
+  const first = rows[0];
+  const dateKey = findKey(first, ['date','transaction date','txn date']);
+  const descKey = findKey(first, ['description','narration','details','particulars']);
+  const amountKey = findKey(first, ['amount','value','txn amount']);
+  const typeKey = findKey(first, ['type','transaction type','dr/cr']);
+  const merchantKey = findKey(first, ['merchant','payee']);
+  const categoryKey = findKey(first, ['category']);
+  if (!dateKey || !descKey || !amountKey) {
+    const missing = [!dateKey&&'date', !descKey&&'description', !amountKey&&'amount'].filter(Boolean);
+    return { transactions:[], errors:[{row:0,message:`Missing required column(s): ${missing.join(', ')}. Expected headers like Date, Description, Amount.`}], duplicatesSkipped:0, rowsRead:rows.length };
+  }
+  const transactions = []; const seen = new Set(); let duplicatesSkipped = 0;
+  rows.forEach((row, idx) => {
+    const rowNum = idx+2;
+    const rawDate = row[dateKey]||'', rawDesc = (row[descKey]||'').trim(), rawAmount = row[amountKey]||'';
+    const date = parseDateStr(rawDate);
+    if (!date) { errors.push({row:rowNum, message:`Invalid or unrecognized date: "${rawDate}"`}); return; }
+    if (!rawDesc) { errors.push({row:rowNum, message:'Missing transaction description.'}); return; }
+    const parsedAmount = parseAmountAndType(rawAmount, typeKey ? row[typeKey] : undefined);
+    if (!parsedAmount) { errors.push({row:rowNum, message:`Invalid amount: "${rawAmount}"`}); return; }
+    if (parsedAmount.amount === 0) { errors.push({row:rowNum, message:'Amount is zero — skipped.'}); return; }
+    const dedupeKey = `${date}|${rawDesc.toLowerCase()}|${parsedAmount.amount}|${parsedAmount.type}`;
+    if (seen.has(dedupeKey)) { duplicatesSkipped += 1; return; }
+    seen.add(dedupeKey);
+    const merchant = merchantKey ? (row[merchantKey]||'').trim() : undefined;
+    const presetCategory = categoryKey ? (row[categoryKey]||'').trim() : undefined;
+    const cat = presetCategory ? { category: presetCategory, confidence:1, reason:'Provided in source file.' } : categorizeTransaction(rawDesc, merchant, parsedAmount.type);
+    transactions.push({ id: nextId('csv'), date, description: rawDesc, amount: parsedAmount.amount, type: parsedAmount.type,
+      merchant, category: cat.category, categoryConfidence: cat.confidence, categoryReason: cat.reason });
+  });
+  return { transactions, errors, duplicatesSkipped, rowsRead: rows.length };
+}
+
+// ═════════════════════════════════════════════════════════════════
+// AGENT — intent classifier (rule-based NLU)
+// ═════════════════════════════════════════════════════════════════
+const CATEGORY_WORDS = ['food','shopping','transport','bills','rent','entertainment','healthcare','education','subscriptions','travel'];
+function classifyIntent(question) {
+  const q = question.toLowerCase();
+  const matches = [];
+  const amountMatch = q.match(/(?:₹|rs\.?|inr)?\s?([\d,]+(?:\.\d+)?)\s?(?:rupees|₹)?/i);
+  const extractedAmount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g,'')) : undefined;
+  if (/can i (spend|afford)|should i spend|is it okay to spend|afford to spend/.test(q) && extractedAmount) matches.push({ intent:'can_i_spend', confidence:0.95, extractedAmount });
+  if (/what happens (to|if)|impact (on|of)|if i spend/.test(q) && extractedAmount) matches.push({ intent:'can_i_spend', confidence:0.9, extractedAmount });
+  if (/subscription|recurring|netflix|spotify|gym/.test(q)) matches.push({ intent:'subscriptions', confidence:0.9 });
+  if (/bill|due|upcoming|obligation|payment coming/.test(q)) matches.push({ intent:'upcoming_bills', confidence:0.85 });
+  if (/goal|on track|saving target|save.*(month|deadline)/.test(q)) matches.push({ intent:'goal_progress', confidence:0.85 });
+  if (/overspend|over budget|where.*(spending too much|overspending)/.test(q)) matches.push({ intent:'overspending', confidence:0.85 });
+  if (/compare|last month|previous month|changed|vs\.?|versus/.test(q)) matches.push({ intent:'month_comparison', confidence:0.8 });
+  if (/review|unusual|flag|anomal|suspicious|weird/.test(q)) matches.push({ intent:'review_expenses', confidence:0.8 });
+  const category = CATEGORY_WORDS.find(c => q.includes(c));
+  if (category && /spen[dt]|cost|paid|expense/.test(q)) matches.push({ intent:'category_spend', confidence:0.85, extractedCategory: category.charAt(0).toUpperCase()+category.slice(1) });
+  if (!matches.length) matches.push({ intent:'general_summary', confidence:0.5, extractedAmount });
+  return matches.sort((a,b)=>b.confidence-a.confidence);
+}
+
+// ═════════════════════════════════════════════════════════════════
+// AGENT ORCHESTRATOR — the core agent loop
+// ═════════════════════════════════════════════════════════════════
+const TOOL_LABELS = {
+  TransactionAnalyzer:'Analyzing your transactions', RecurringDetector:'Checking recurring payments',
+  AnomalyDetector:'Scanning for unusual spending', BudgetAnalyzer:'Comparing spending against your budget',
+  ObligationAnalyzer:'Checking upcoming obligations', GoalCalculator:'Calculating goal impact', ImpactCalculator:'Simulating spending impact',
+};
+const INTENT_TOOLS = {
+  category_spend:['TransactionAnalyzer'], subscriptions:['RecurringDetector'], upcoming_bills:['ObligationAnalyzer'],
+  goal_progress:['TransactionAnalyzer','GoalCalculator'],
+  can_i_spend:['BudgetAnalyzer','ObligationAnalyzer','GoalCalculator','ImpactCalculator'],
+  overspending:['BudgetAnalyzer','AnomalyDetector'], month_comparison:['TransactionAnalyzer'],
+  review_expenses:['AnomalyDetector','BudgetAnalyzer'], general_summary:['TransactionAnalyzer','BudgetAnalyzer','ObligationAnalyzer'],
+};
+function buildSteps(tools) {
+  return [{id:'understand',label:'Understanding request',status:'pending'},
+    {id:'context',label:'Checking financial context',status:'pending'},
+    ...tools.map(t => ({id:t, label:TOOL_LABELS[t]||t, status:'pending'})),
+    {id:'generate',label:'Generating recommendation',status:'pending'}];
+}
+function delay(ms) { return new Promise(r=>setTimeout(r,ms)); }
+
+async function runAgent(question, state, onStep) {
+  const matches = classifyIntent(question);
+  const primary = matches.filter(m=>m.confidence>=0.7).map(m=>m.intent);
+  const intents = primary.length ? primary : [matches[0].intent];
+  const toolSet = new Set(); intents.forEach(i => INTENT_TOOLS[i].forEach(t=>toolSet.add(t)));
+  const tools = Array.from(toolSet);
+  const steps = buildSteps(tools);
+  const setStep = (id, status) => { const s = steps.find(x=>x.id===id); if (s) s.status = status; onStep && onStep(steps.map(s=>({...s}))); };
+
+  setStep('understand','active'); await delay(220); setStep('understand','done');
+  setStep('context','active'); await delay(180); setStep('context','done');
+
+  const toolResults = {};
+  for (const tool of tools) {
+    setStep(tool,'active'); await delay(260);
+    if (tool==='TransactionAnalyzer') {
+      const category = matches.find(m=>m.extractedCategory) ? matches.find(m=>m.extractedCategory).extractedCategory : undefined;
+      toolResults.transactionAnalysis = category ? analyzeTransactions(state.transactions,{category}) : analyzeCurrentMonth(state.transactions);
+      if (intents.includes('month_comparison')) {
+        toolResults.currentMonth = analyzeCurrentMonth(state.transactions);
+        toolResults.previousMonth = analyzePreviousMonth(state.transactions);
+      }
+    } else if (tool==='RecurringDetector') {
+      toolResults.recurring = detectRecurringPayments(state.transactions);
+    } else if (tool==='AnomalyDetector') {
+      toolResults.anomalies = detectAnomalies(state.transactions);
+    } else if (tool==='BudgetAnalyzer') {
+      toolResults.budgetLines = analyzeBudget(state.transactions, state.profile);
+      toolResults.budgetSummary = totalBudgetSummary(state.transactions, state.profile);
+    } else if (tool==='ObligationAnalyzer') {
+      const recurring = toolResults.recurring || detectRecurringPayments(state.transactions);
+      toolResults.obligations = analyzeObligations(recurring);
+    } else if (tool==='GoalCalculator') {
+      toolResults.goalProgress = calculateGoalProgress(state.transactions, state.profile);
+    } else if (tool==='ImpactCalculator') {
+      const amount = matches.find(m=>m.extractedAmount) ? matches.find(m=>m.extractedAmount).extractedAmount : 0;
+      const recurring = toolResults.recurring || detectRecurringPayments(state.transactions);
+      const obligations = toolResults.obligations || analyzeObligations(recurring);
+      toolResults.spendingImpact = calculateSpendingImpact(amount, state.transactions, state.profile, obligations);
+    }
+    setStep(tool,'done');
+  }
+
+  setStep('generate','active');
+  const answer = composeTemplateAnswer(intents, toolResults, state, matches);
+  await delay(140);
+  setStep('generate','done');
+
+  return { id:`turn-${Date.now()}`, question, intents, toolsUsed: tools, activitySteps: steps, answer, toolResults, timestamp: new Date().toISOString() };
+}
+
+function composeTemplateAnswer(intents, results, state, matches) {
+  const parts = [];
+  if (intents.includes('can_i_spend')) {
+    const impact = results.spendingImpact;
+    if (!impact || impact.proposedAmount <= 0) return "I couldn't find an amount in your question. Try asking, for example, \"Can I spend ₹5,000 this month?\"";
+    const amt = inr(impact.proposedAmount);
+    if (impact.verdict === 'affordable') {
+      parts.push(`Based on the financial information currently available, spending ${amt} looks affordable this month. Your remaining budget would go from ${inr(impact.remainingBudgetBefore)} to ${inr(impact.remainingBudgetAfter)}, and after your upcoming obligations of ${inr(impact.upcomingObligationsTotal)} you'd still have ${inr(impact.cashLeftAfterObligations)} in hand.`);
+    } else if (impact.verdict === 'tight') {
+      parts.push(`Spending ${amt} is possible, but it would be tight. Your remaining budget would drop to ${inr(impact.remainingBudgetAfter)}, leaving ${inr(impact.cashLeftAfterObligations)} after your ${inr(impact.upcomingObligationsTotal)} in upcoming obligations.`);
+      if (impact.wouldMissGoalPace && impact.requiredMonthlySaving != null) parts.push(`It would also slow progress toward your savings goal, which currently needs about ${inr(impact.requiredMonthlySaving)}/month to stay on schedule.`);
+    } else {
+      parts.push(`Based on your recorded spending, ${amt} would put you at risk this month. ` +
+        (impact.wouldExceedBudget ? `It would exceed your remaining budget of ${inr(impact.remainingBudgetBefore)} by ${inr(Math.abs(impact.remainingBudgetAfter))}. ` : '') +
+        (impact.wouldBreakObligations ? `After accounting for ${inr(impact.upcomingObligationsTotal)} in upcoming obligations, you'd be short by ${inr(Math.abs(impact.cashLeftAfterObligations))}. ` : ''));
+      parts.push('Consider reviewing this expense or postponing part of it until your next income cycle.');
+    }
+    return parts.join(' ');
+  }
+  if (intents.includes('subscriptions')) {
+    const recurring = results.recurring;
+    if (!recurring || !recurring.length) return "I didn't detect any recurring subscriptions in your uploaded transactions yet. Upload more transaction history and I'll check again.";
+    const total = recurring.reduce((s,r)=>s+r.amount,0);
+    const list = recurring.map(r=>`${r.merchant} (${inr(r.amount)}/${r.frequency.replace('ly','')})`).join(', ');
+    return `You have ${recurring.length} recurring payment${recurring.length>1?'s':''} totaling ${inr(total)} per cycle: ${list}.`;
+  }
+  if (intents.includes('upcoming_bills')) {
+    const obligations = results.obligations;
+    if (!obligations || !obligations.length) return 'You have no upcoming obligations detected in the next 30 days based on your recorded recurring payments.';
+    const total = totalUpcomingAmount(obligations);
+    const list = obligations.map(o=>`${o.name} — ${inr(o.amount)} (${relativeDays(o.daysRemaining)})`).join('; ');
+    return `You have ${obligations.length} obligation${obligations.length>1?'s':''} coming up, totaling ${inr(total)}: ${list}.`;
+  }
+  if (intents.includes('goal_progress')) {
+    const goal = results.goalProgress;
+    if (!goal) return "You haven't set a savings goal yet. Add one in onboarding and I'll track your progress toward it.";
+    const status = goal.onTrack
+      ? `Based on this month's numbers, you're on track — your projected net saving of ${inr(goal.currentMonthNetSaving)} meets the ${inr(goal.requiredMonthlySaving)}/month pace needed.`
+      : `Based on this month's numbers, you're currently behind pace. You'd need roughly ${inr(goal.requiredMonthlySaving)}/month to reach your goal on time, but this month's projected net saving is ${inr(goal.currentMonthNetSaving)} — a gap of about ${inr(Math.abs(goal.gapPerMonth))}.`;
+    return `Toward "${goal.goalName}" (${inr(goal.savedSoFar)} of ${inr(goal.targetAmount)} saved, ${pct(goal.progressPct)} of the way there): ${status}`;
+  }
+  if (intents.includes('overspending')) {
+    const budgetLines = results.budgetLines, anomalies = results.anomalies;
+    const overCats = (budgetLines||[]).filter(b=>b.status==='over');
+    const bits = [];
+    bits.push(overCats.length ? `Your recorded spending suggests you're over budget in ${overCats.map(c=>`${c.category} (${pct(c.pctUsed)} of ${inr(c.budget)} used)`).join(', ')}.` : "You're not over budget in any category this month based on current data.");
+    if (anomalies && anomalies.length) bits.push(`I also flagged ${anomalies.length} unusual transaction${anomalies.length>1?'s':''}: ${anomalies.map(a=>a.description).join(', ')}.`);
+    return bits.join(' ');
+  }
+  if (intents.includes('month_comparison')) {
+    const current = results.currentMonth, previous = results.previousMonth;
+    if (!current || !previous || !previous.transactionCount) return "I don't have enough previous-month data to compare yet. Upload more transaction history for a month-over-month comparison.";
+    const diff = current.totalExpenses - previous.totalExpenses;
+    const direction = diff>0 ? 'higher':'lower';
+    const pctChange = previous.totalExpenses>0 ? Math.abs(Math.round((diff/previous.totalExpenses)*100)) : 0;
+    return `Your spending this month is ${inr(Math.abs(diff))} ${direction} than last month (${pctChange}% ${direction}) — ${inr(current.totalExpenses)} vs ${inr(previous.totalExpenses)} previously. Net cash flow this month is ${inr(current.netCashFlow)}, compared with ${inr(previous.netCashFlow)} last month.`;
+  }
+  if (intents.includes('review_expenses')) {
+    const anomalies = results.anomalies;
+    if (!anomalies || !anomalies.length) return 'Nothing stands out — I did not detect any unusual spending patterns in your recorded transactions.';
+    return `I'd suggest reviewing ${anomalies.length} transaction${anomalies.length>1?'s':''}: ${anomalies.map(a=>a.message).join(' ')}`;
+  }
+  if (intents.includes('category_spend')) {
+    const analysis = results.transactionAnalysis;
+    const category = matches.find(m=>m.extractedCategory) ? matches.find(m=>m.extractedCategory).extractedCategory : undefined;
+    if (!analysis || !analysis.transactionCount) return `I couldn't find any transactions${category?` in ${category}`:''} in your uploaded data.`;
+    return `You've spent ${inr(analysis.totalExpenses)} on ${category||'this category'} across ${analysis.transactionCount} transaction${analysis.transactionCount>1?'s':''}, averaging ${inr(analysis.avgMonthlySpend)}/month at the current pace.`;
+  }
+  const analysis = results.transactionAnalysis, budgetSummary = results.budgetSummary, obligations = results.obligations;
+  if (!state.transactions.length) return "I don't have any transaction data yet. Upload a CSV or load the demo dataset so I can analyze your finances.";
+  const bits = [
+    analysis ? `This month you've spent ${inr(analysis.totalExpenses)} against income of ${inr(analysis.totalIncome)}.` : '',
+    budgetSummary ? `That's ${pct(budgetSummary.pctUsed)} of your ${inr(budgetSummary.budget)} monthly budget, with ${inr(Math.max(0,budgetSummary.remaining))} remaining.` : '',
+    obligations && obligations.length ? `You have ${obligations.length} upcoming obligation${obligations.length>1?'s':''} totaling ${inr(totalUpcomingAmount(obligations))}.` : '',
+  ].filter(Boolean);
+  return bits.join(' ') || "Ask me about your spending, subscriptions, bills, or savings goal and I'll analyze your data.";
+}
+</script>
+<script type="text/babel" data-presets="react">
+
+// ═════════════════════════════════════════════════════════════════
+// STATE — reducer-based financial state with before/after snapshots
+// ═════════════════════════════════════════════════════════════════
+const STORAGE_KEY = 'finora-state-v1';
+const AUTH_KEY = 'finora-auth-v1';
+const DEMO_EMAIL = 'demo@finora.app';
+const DEMO_PASSWORD = 'finora123';
+
+const EMPTY_PROFILE = { income:0, balance:0, monthlyBudget:0, categoryBudgets:{}, goal:null };
+const initialState = { onboarded:false, profile: EMPTY_PROFILE, transactions:[], recurring:[], obligations:[], budgets:[], anomalies:[], insights:[], history:[], snapshots:[], lastUpdated:null };
+
+function snapshotOf(state, label) {
+  const summary = totalBudgetSummary(state.transactions, state.profile);
+  const goal = calculateGoalProgress(state.transactions, state.profile);
+  return { label, timestamp:new Date().toISOString(), totalExpenses:summary.actual,
+    netCashFlow: state.profile.income - summary.actual,
+    projectedSavings: goal ? goal.currentMonthNetSaving : state.profile.income - summary.actual,
+    remainingBudget: summary.remaining };
+}
+function recompute(state) {
+  const recurring = detectRecurringPayments(state.transactions);
+  const anomalies = detectAnomalies(state.transactions);
+  const budgets = analyzeBudget(state.transactions, state.profile);
+  const obligations = analyzeObligations(recurring);
+  const insights = generateInsights(state.transactions, state.profile);
+  return { ...state, recurring, anomalies, budgets, obligations, insights, lastUpdated: new Date().toISOString() };
+}
+function reducer(state, action) {
+  switch (action.type) {
+    // Generic "set profile + a batch of transactions" used by every data
+    // source (demo data, simulated email sync, or a fresh manual profile
+    // with no transactions yet ahead of a CSV upload).
+    case 'SETUP': {
+      const next = recompute({ ...state, profile: action.profile, transactions: action.transactions, onboarded:true });
+      return { ...next, snapshots:[snapshotOf(next, action.label)] };
+    }
+    case 'ADD_TRANSACTIONS': {
+      const merged = [...state.transactions, ...action.transactions];
+      const next = recompute({ ...state, transactions: merged });
+      return { ...next, snapshots:[...next.snapshots, snapshotOf(next, action.label)] };
+    }
+    case 'ADD_UNEXPECTED_EXPENSE': {
+      const raw = unexpectedExpenseTransaction();
+      const c = categorizeTransaction(raw.description, raw.merchant, raw.type);
+      const txn = { ...raw, category:c.category, categoryConfidence:c.confidence, categoryReason:c.reason };
+      const merged = [...state.transactions, txn];
+      const next = recompute({ ...state, transactions: merged });
+      return { ...next, snapshots:[...next.snapshots, snapshotOf(next,'Unexpected ₹4,000 expense added')] };
+    }
+    case 'RECORD_TURN': return { ...state, history:[...state.history, action.turn] };
+    case 'RESET': return initialState;
+    default: return state;
+  }
+}
+
+const FinanceContext = createContext(null);
+function FinanceProvider({ children }) {
+  const [state, dispatch] = useReducer(reducer, initialState, (init) => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) { const parsed = JSON.parse(saved); if (parsed && parsed.onboarded) return parsed; }
+    } catch (e) { /* ignore corrupt storage */ }
+    return init;
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* storage unavailable */ }
+  }, [state]);
+
+  const setupWithSource = useCallback((profile, transactions, label) => dispatch({type:'SETUP', profile, transactions, label}), []);
+  const addTransactions = useCallback((transactions,label) => dispatch({type:'ADD_TRANSACTIONS', transactions, label}), []);
+  const addUnexpectedExpense = useCallback(() => dispatch({type:'ADD_UNEXPECTED_EXPENSE'}), []);
+  const recordTurn = useCallback((turn) => dispatch({type:'RECORD_TURN', turn}), []);
+  const resetData = useCallback(() => { try { localStorage.removeItem(STORAGE_KEY); } catch(e){} dispatch({type:'RESET'}); }, []);
+
+  const value = useMemo(() => ({ state, setupWithSource, addTransactions, addUnexpectedExpense, recordTurn, resetData }),
+    [state, setupWithSource, addTransactions, addUnexpectedExpense, recordTurn, resetData]);
+  return <FinanceContext.Provider value={value}>{children}</FinanceContext.Provider>;
+}
+function useFinance() { const ctx = useContext(FinanceContext); if (!ctx) throw new Error('useFinance must be used within FinanceProvider'); return ctx; }
+
+// ─── Auth (demo-only, no real backend) ───────────────────────────
+function useAuth() {
+  const [user, setUser] = useState(() => {
+    try { const saved = localStorage.getItem(AUTH_KEY); return saved ? JSON.parse(saved) : null; }
+    catch (e) { return null; }
+  });
+  const login = useCallback((email) => {
+    const u = { email, loggedInAt: new Date().toISOString() };
+    try { localStorage.setItem(AUTH_KEY, JSON.stringify(u)); } catch(e) {}
+    setUser(u);
+  }, []);
+  const logout = useCallback(() => {
+    try { localStorage.removeItem(AUTH_KEY); } catch(e) {}
+    setUser(null);
+  }, []);
+  return { user, login, logout };
+}
+</script>
+<script type="text/babel" data-presets="react">
+
+// ═════════════════════════════════════════════════════════════════
+// COMPONENT — Login (demo auth, no real backend)
+// ═════════════════════════════════════════════════════════════════
+function Login({ onLogin }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const autofill = () => { setEmail(DEMO_EMAIL); setPassword(DEMO_PASSWORD); setError(''); };
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!email.trim() || !password.trim()) { setError('Enter an email and password to continue.'); return; }
+    onLogin(email.trim());
+  };
+
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-brand-50 via-canvas to-brand-50 px-4">
+      <div className="w-full max-w-sm">
+        <div className="flex flex-col items-center mb-7">
+          <div className="w-12 h-12 rounded-2xl bg-brand-500 shadow-pop flex items-center justify-center mb-3">
+            <span className="text-white text-xl">💠</span>
+          </div>
+          <span className="font-extrabold text-xl tracking-tight text-ink-900">Finora</span>
+          <span className="text-ink-500 text-sm mt-1">Understand your money. Decide what's next.</span>
+        </div>
+
+        <div className="bg-surface rounded-xl2 border border-line shadow-card p-6">
+          <h1 className="font-bold text-lg text-ink-900 mb-1">Welcome back</h1>
+          <p className="text-ink-500 text-sm mb-5">Sign in to continue to your dashboard.</p>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-500 mb-1.5">Email</span>
+              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"
+                className="w-full rounded-lg bg-surface2 border border-line focus:border-brand-500 focus:ring-2 focus:ring-brand-100 focus:outline-none px-3.5 py-2.5 text-sm text-ink-900" />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-500 mb-1.5">Password</span>
+              <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••"
+                className="w-full rounded-lg bg-surface2 border border-line focus:border-brand-500 focus:ring-2 focus:ring-brand-100 focus:outline-none px-3.5 py-2.5 text-sm text-ink-900" />
+            </label>
+            {error && <div className="text-xs text-bad-600 bg-bad-50 rounded-lg px-3 py-2">{error}</div>}
+            <button type="submit" className="w-full rounded-lg bg-brand-500 hover:bg-brand-600 transition-colors text-white font-semibold text-sm py-2.5 shadow-pop">
+              Sign in
+            </button>
+          </form>
+
+          <div className="flex items-center gap-3 my-4">
+            <div className="h-px flex-1 bg-line" /><span className="text-ink-400 text-xs">or</span><div className="h-px flex-1 bg-line" />
+          </div>
+
+          <button onClick={autofill} className="w-full rounded-lg border border-brand-200 bg-brand-50 hover:bg-brand-100 transition-colors text-brand-700 font-medium text-sm py-2.5 flex items-center justify-center gap-2">
+            <span>✨</span> Autofill demo credentials
+          </button>
+          <p className="text-center text-[11px] text-ink-400 mt-3">This is a demo product — any email/password works. Use the demo account for the full walkthrough.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// COMPONENT — ConnectData (post-login setup: profile + data source)
+// ═════════════════════════════════════════════════════════════════
+function ProfileField({ label, value, onChange, type }) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-ink-500 mb-1.5">{label}</span>
+      <input type={type} value={value} onChange={e=>onChange(e.target.value)}
+        className="w-full rounded-lg bg-surface2 border border-line focus:border-brand-500 focus:ring-2 focus:ring-brand-100 focus:outline-none px-3 py-2.5 text-sm text-ink-900 num" />
+    </label>
+  );
+}
+
+function SourceTile({ icon, title, description, selected, onClick, badge }) {
+  return (
+    <button onClick={onClick} className={`w-full text-left rounded-xl2 border px-4 py-3.5 transition-colors flex items-start gap-3 ${selected ? 'border-brand-400 bg-brand-50' : 'border-line bg-surface hover:border-brand-200 hover:bg-brand-50/40'}`}>
+      <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-base shrink-0 ${selected ? 'bg-brand-500 text-white' : 'bg-surface2 text-ink-700'}`}>{icon}</div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-ink-900">{title}</span>
+          {badge && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-info-50 text-info-500 font-medium">{badge}</span>}
+        </div>
+        <div className="text-xs text-ink-500 mt-0.5">{description}</div>
+      </div>
+    </button>
+  );
+}
+
+function ConnectData() {
+  const { setupWithSource } = useFinance();
+  const [source, setSource] = useState(null); // 'scratch' | 'demo' | 'email' | 'upload'
+  const [income,setIncome] = useState('');
+  const [balance,setBalance] = useState('');
+  const [budget,setBudget] = useState('');
+  const [goalName,setGoalName] = useState('');
+  const [goalAmount,setGoalAmount] = useState('');
+  const [goalMonths,setGoalMonths] = useState('');
+  const [savedSoFar,setSavedSoFar] = useState('');
+  const [includeGoal,setIncludeGoal] = useState(false);
+  const [showCustomize, setShowCustomize] = useState(false);
+
+  const [emailStage, setEmailStage] = useState('idle'); // idle | connecting | done
+  const [emailFound, setEmailFound] = useState(0);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [uploadFileName, setUploadFileName] = useState(null);
+  const inputRef = useRef(null);
+
+  const buildProfile = () => ({
+    income: Number(income)||0, balance: Number(balance)||0, monthlyBudget: Number(budget)||0, categoryBudgets:{},
+    goal: includeGoal ? { name: goalName||'Savings goal', amount:Number(goalAmount)||0, deadlineMonths:Number(goalMonths)||1, startDate: iso(new Date()), savedSoFar:Number(savedSoFar)||0 } : null,
+  });
+
+  const startDemo = () => {
+    setSource('demo');
+    const raw = generateDemoTransactions();
+    const txns = raw.map(t => { const c = categorizeTransaction(t.description,t.merchant,t.type); return { ...t, category:c.category, categoryConfidence:c.confidence, categoryReason:c.reason }; });
+    setupWithSource(DEMO_PROFILE, txns, 'Demo data loaded');
+  };
+
+  const selectScratch = () => { setSource('scratch'); setShowCustomize(true); };
+  const canCreateScratch = income !== '' && budget !== '';
+  const startScratch = () => {
+    if (!canCreateScratch) return;
+    setupWithSource(buildProfile(), [], 'Profile created — add your transactions to get started');
+  };
+
+  const startEmailConnect = () => {
+    setSource('email');
+    setEmailStage('connecting');
+    setTimeout(() => {
+      const raw = generateEmailSyncTransactions();
+      setEmailFound(raw.length);
+      setEmailStage('done');
+      window.__emailTxnsCache = raw;
+    }, 1500);
+  };
+  const confirmEmailImport = () => {
+    const raw = window.__emailTxnsCache || [];
+    const txns = raw.map(t => { const c = categorizeTransaction(t.description,t.merchant,t.type); return { ...t, category:c.category, categoryConfidence:c.confidence, categoryReason:c.reason }; });
+    setupWithSource(buildProfile(), txns, 'Synced from email (simulated)');
+  };
+
+  const handleUploadFile = (file) => {
+    setUploadFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { setUploadResult(parseTransactionsCsv(reader.result)); }
+      catch (err) { setUploadResult({ transactions:[], errors:[{row:0,message:String(err)}], duplicatesSkipped:0, rowsRead:0 }); }
+    };
+    reader.onerror = () => setUploadResult({ transactions:[], errors:[{row:0,message:'Could not read the file. Please try again.'}], duplicatesSkipped:0, rowsRead:0 });
+    reader.readAsText(file);
+  };
+  const confirmUploadImport = () => {
+    if (!uploadResult || !uploadResult.transactions.length) return;
+    setupWithSource(buildProfile(), uploadResult.transactions, `Imported ${uploadResult.transactions.length} transactions from ${uploadFileName}`);
+  };
+  const downloadSample = () => {
+    const blob = new Blob([SAMPLE_CSV], { type:'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'sample-transactions.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="min-h-screen w-full bg-canvas flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-lg">
+        <div className="text-center mb-6">
+          <h1 className="font-extrabold text-2xl text-ink-900">Set up your finances</h1>
+          <p className="text-ink-500 text-sm mt-1.5">Start from zero and enter your own numbers — you can add more data anytime.</p>
+        </div>
+
+        <div className="bg-surface rounded-xl2 border border-line shadow-card p-5 space-y-3">
+          <SourceTile icon="✍️" title="Start from scratch" badge="Recommended"
+            description="Enter your own income, budget & goal, then add each transaction yourself"
+            selected={source==='scratch'} onClick={selectScratch} />
+          {source==='scratch' && (
+            <div className="ml-2 pl-4 border-l-2 border-brand-200 py-2 text-xs text-ink-500">
+              Fill in your details below, then create your profile. No sample data is added — you'll add your own transactions from the dashboard afterwards.
+            </div>
+          )}
+
+          <SourceTile icon="⚡" title="Try instant demo data" badge="Fastest"
+            description="Fictional sample profile + ~70 transactions, ready in one click"
+            selected={source==='demo'} onClick={startDemo} />
+
+          
+
+          <SourceTile icon="📄" title="Upload a statement" badge="CSV"
+            description="Bring your own bank/card statement or transaction history"
+            selected={source==='upload'} onClick={()=>setSource('upload')} />
+          {source==='upload' && (
+            <div className="ml-2 pl-4 border-l-2 border-brand-200 py-2 space-y-3">
+              <div className="border border-dashed border-ink-400/40 rounded-lg px-4 py-6 text-center cursor-pointer hover:border-brand-400 transition-colors bg-surface2"
+                onClick={()=>inputRef.current && inputRef.current.click()}
+                onDragOver={e=>e.preventDefault()}
+                onDrop={e=>{ e.preventDefault(); const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) handleUploadFile(f); }}>
+                <input ref={inputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={e=>{ const f = e.target.files && e.target.files[0]; if (f) handleUploadFile(f); }} />
+                <div className="text-sm text-ink-700">{uploadFileName ? <span className="num">{uploadFileName}</span> : 'Click to choose a CSV, or drag it here'}</div>
+              </div>
+              <button onClick={downloadSample} className="text-xs text-brand-600 hover:text-brand-700 underline underline-offset-2">Download sample CSV</button>
+              {uploadResult && (
+                <div className="space-y-2">
+                  <div className="flex gap-4 text-xs text-ink-500">
+                    <span><b className="text-ink-900">{uploadResult.transactions.length}</b> valid</span>
+                    <span><b className="text-ink-900">{uploadResult.duplicatesSkipped}</b> duplicates skipped</span>
+                    <span className={uploadResult.errors.length ? 'text-bad-600' : ''}><b>{uploadResult.errors.length}</b> errors</span>
+                  </div>
+                  {uploadResult.errors.length > 0 && (
+                    <div className="max-h-24 overflow-y-auto rounded-md bg-bad-50 border border-bad-100 p-2 text-[11px] text-bad-600 space-y-0.5">
+                      {uploadResult.errors.slice(0,10).map((e,i) => <div key={i}>Row {e.row}: {e.message}</div>)}
+                    </div>
+                  )}
+                  <button disabled={!uploadResult.transactions.length} onClick={confirmUploadImport}
+                    className="rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-40 transition-colors text-white text-sm font-semibold px-4 py-2">
+                    Import {uploadResult.transactions.length} transaction{uploadResult.transactions.length===1?'':'s'} & continue
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {source!=='scratch' && (
+            <button onClick={()=>setShowCustomize(v=>!v)} className="w-full text-left text-xs text-ink-500 hover:text-ink-700 px-1 pt-1">
+              {showCustomize ? '▾' : '▸'} Customize your income, budget & goal {source==='demo' ? '(not used with instant demo data)' : ''}
+            </button>
+          )}
+          {showCustomize && (
+            <div className="space-y-3 pt-1 px-1">
+              <div className="grid grid-cols-2 gap-3">
+                <ProfileField label="Monthly income (₹)" value={income} onChange={setIncome} type="number" />
+                <ProfileField label="Available balance (₹)" value={balance} onChange={setBalance} type="number" />
+              </div>
+              <ProfileField label="Monthly budget (₹)" value={budget} onChange={setBudget} type="number" />
+              <label className="flex items-center gap-2 text-xs text-ink-600 cursor-pointer">
+                <input type="checkbox" checked={includeGoal} onChange={e=>setIncludeGoal(e.target.checked)} className="accent-brand-500" /> Set a savings goal
+              </label>
+              {includeGoal && (
+                <div className="space-y-3">
+                  <ProfileField label="Goal name" value={goalName} onChange={setGoalName} type="text" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <ProfileField label="Goal amount (₹)" value={goalAmount} onChange={setGoalAmount} type="number" />
+                    <ProfileField label="Deadline (months)" value={goalMonths} onChange={setGoalMonths} type="number" />
+                  </div>
+                  <ProfileField label="Already saved (₹)" value={savedSoFar} onChange={setSavedSoFar} type="number" />
+                </div>
+              )}
+              {source==='scratch' && (
+                <button disabled={!canCreateScratch} onClick={startScratch}
+                  className="w-full rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-white font-semibold text-sm py-2.5 mt-1">
+                  Create my profile & start with zero transactions
+                </button>
+              )}
+              {source==='scratch' && !canCreateScratch && (
+                <p className="text-[11px] text-ink-400 px-1">Enter at least your monthly income and budget to continue.</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <p className="text-center text-[11px] text-ink-400 mt-4">Finora is decision-support software, not a financial advisor or investment product.</p>
+      </div>
+    </div>
+  );
+}
+</script>
+<script type="text/babel" data-presets="react">
+
+const SAMPLE_CSV = `Date,Description,Amount,Type,Merchant
+2026-09-01,Rent payment to landlord,15000,Debit,Landlord - Housing Society
+2026-09-02,Salary credited,60000,Credit,Employer Payroll
+2026-09-03,Netflix monthly subscription,499,Debit,Netflix
+2026-09-05,Swiggy order - dinner,420,Debit,Swiggy
+2026-09-06,BigBasket grocery run,2350,Debit,BigBasket
+2026-09-07,Uber ride,240,Debit,Uber
+2026-09-08,Electricity bill - BSES,1850,Debit,BSES Electricity
+2026-09-12,Amazon order - unusually large electronics purchase,12400,Debit,Amazon
+2026-09-15,DMart grocery shopping,3100,Debit,DMart`;
+
+// ═════════════════════════════════════════════════════════════════
+// COMPONENT — Snapshot banner (shows the agent's before/after re-evaluation)
+// ═════════════════════════════════════════════════════════════════
+function SnapshotBanner() {
+  const { state } = useFinance();
+  const [dismissedFor, setDismissedFor] = useState(null);
+  const snapshots = state.snapshots;
+  const latest = snapshots[snapshots.length-1];
+  const previous = snapshots.length >= 2 ? snapshots[snapshots.length-2] : null;
+  const key = latest ? `${latest.label}-${latest.timestamp}` : null;
+  const visible = !!previous && key !== dismissedFor;
+  if (!visible || !previous || !latest) return null;
+  const savingsDiff = latest.projectedSavings - previous.projectedSavings;
+  const changed = Math.abs(savingsDiff) >= 1 || Math.abs(latest.remainingBudget - previous.remainingBudget) >= 1;
+  if (!changed) return null;
+  return (
+    <div className="fade-in border-b border-brand-100 bg-brand-50 px-6 py-3 flex items-center justify-between gap-4">
+      <div className="flex items-center gap-3 text-sm">
+        <span className="flex h-2 w-2 rounded-full bg-brand-500 pulse-dot shrink-0" />
+        <span className="text-ink-700">
+          <span className="text-brand-600 font-semibold">Finora re-evaluated</span> after "{latest.label}" — projected savings {savingsDiff<0?'dropped':'rose'} from <span className="num font-medium">{inr(previous.projectedSavings)}</span> to <span className="num font-medium">{inr(latest.projectedSavings)}</span>, remaining budget now <span className="num font-medium">{inr(latest.remainingBudget)}</span>.
+        </span>
+      </div>
+      <button onClick={()=>setDismissedFor(key)} className="text-ink-400 hover:text-ink-700 text-sm shrink-0" aria-label="Dismiss">✕</button>
+    </div>
+  );
+}
+
+function Stat({ label, value, tone }) {
+  return <div><div className={`num text-base font-semibold ${tone==='warn' && value>0 ? 'text-bad-600' : 'text-ink-900'}`}>{value}</div><div className="text-[11px] text-ink-400">{label}</div></div>;
+}
+
+// ═════════════════════════════════════════════════════════════════
+// COMPONENT — Upload modal (add a statement any time after setup)
+// ═════════════════════════════════════════════════════════════════
+function UploadModal({ onClose }) {
+  const { addTransactions } = useFinance();
+  const inputRef = useRef(null);
+  const [result, setResult] = useState(null);
+  const [fileName, setFileName] = useState(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleFile = (file) => {
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { setResult(parseTransactionsCsv(reader.result)); }
+      catch (err) { setResult({ transactions:[], errors:[{row:0,message:String(err)}], duplicatesSkipped:0, rowsRead:0 }); }
+    };
+    reader.onerror = () => setResult({ transactions:[], errors:[{row:0,message:'Could not read the file. Please try again.'}], duplicatesSkipped:0, rowsRead:0 });
+    reader.readAsText(file);
+  };
+  const handleImport = () => {
+    if (!result || !result.transactions.length) return;
+    setImporting(true);
+    addTransactions(result.transactions, `Imported ${result.transactions.length} transactions from ${fileName}`);
+    setTimeout(onClose, 400);
+  };
+  const downloadSample = () => {
+    const blob = new Blob([SAMPLE_CSV], { type:'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'sample-transactions.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-ink-900/40 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+      <div className="w-full max-w-lg bg-surface border border-line rounded-xl2 shadow-card p-6">
+        <div className="flex items-center justify-between mb-1"><h2 className="font-bold text-lg text-ink-900">Upload a statement</h2><button onClick={onClose} className="text-ink-400 hover:text-ink-700">✕</button></div>
+        <p className="text-ink-500 text-sm mb-5">CSV with Date, Description, Amount columns (Type, Merchant, Category optional).</p>
+        <div className="border border-dashed border-ink-400/40 rounded-lg px-5 py-8 text-center cursor-pointer hover:border-brand-400 transition-colors bg-surface2"
+          onClick={()=>inputRef.current && inputRef.current.click()}
+          onDragOver={e=>e.preventDefault()}
+          onDrop={e=>{ e.preventDefault(); const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) handleFile(f); }}>
+          <input ref={inputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={e=>{ const f = e.target.files && e.target.files[0]; if (f) handleFile(f); }} />
+          <div className="text-sm text-ink-700">{fileName ? <span className="num">{fileName}</span> : 'Click to choose a CSV file, or drag it here'}</div>
+        </div>
+        <div className="flex items-center justify-between mt-3">
+          <button onClick={downloadSample} className="text-xs text-brand-600 hover:text-brand-700 underline underline-offset-2">Download sample CSV</button>
+        </div>
+        {result && (
+          <div className="mt-5 space-y-3">
+            <div className="flex gap-4 text-sm">
+              <Stat label="Rows read" value={result.rowsRead} />
+              <Stat label="Valid transactions" value={result.transactions.length} />
+              <Stat label="Duplicates skipped" value={result.duplicatesSkipped} />
+              <Stat label="Errors" value={result.errors.length} tone={result.errors.length?'warn':undefined} />
+            </div>
+            {result.errors.length > 0 && (
+              <div className="max-h-32 overflow-y-auto rounded-md bg-bad-50 border border-bad-100 p-3 text-xs text-bad-600 space-y-1">
+                {result.errors.slice(0,20).map((e,i) => <div key={i}>Row {e.row}: {e.message}</div>)}
+                {result.errors.length > 20 && <div className="text-ink-400">…and {result.errors.length-20} more</div>}
+              </div>
+            )}
+            <button disabled={!result.transactions.length || importing} onClick={handleImport}
+              className="w-full rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-white font-semibold text-sm py-2.5">
+              {importing ? 'Importing…' : `Import ${result.transactions.length} transaction${result.transactions.length===1?'':'s'}`}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// COMPONENT — Email sync modal (add synced transactions any time)
+// ═════════════════════════════════════════════════════════════════
+function EmailSyncModal({ onClose }) {
+  const { addTransactions } = useFinance();
+  const [stage, setStage] = useState('idle'); // idle | connecting | done
+  const [found, setFound] = useState(0);
+
+  const connect = () => {
+    setStage('connecting');
+    setTimeout(() => { setFound(generateEmailSyncTransactions().length); setStage('done'); }, 1500);
+  };
+  const confirmImport = () => {
+    const raw = generateEmailSyncTransactions();
+    const txns = raw.map(t => { const c = categorizeTransaction(t.description,t.merchant,t.type); return { ...t, category:c.category, categoryConfidence:c.confidence, categoryReason:c.reason }; });
+    addTransactions(txns, `Synced ${txns.length} transactions from email (simulated)`);
+    setTimeout(onClose, 400);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-ink-900/40 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+      <div className="w-full max-w-md bg-surface border border-line rounded-xl2 shadow-card p-6">
+        <div className="flex items-center justify-between mb-1"><h2 className="font-bold text-lg text-ink-900">Connect email</h2><button onClick={onClose} className="text-ink-400 hover:text-ink-700">✕</button></div>
+        <p className="text-ink-500 text-sm mb-5">Simulated integration — in production this would use a real Gmail/Outlook OAuth connection to scan transactional emails.</p>
+        {stage==='idle' && (
+          <button onClick={connect} className="w-full rounded-lg bg-brand-500 hover:bg-brand-600 transition-colors text-white font-semibold text-sm py-2.5 flex items-center justify-center gap-2">
+            <span>✉️</span> Connect Gmail (demo)
+          </button>
+        )}
+        {stage==='connecting' && (
+          <div className="flex items-center gap-2.5 text-sm text-ink-500 py-3">
+            <span className="w-4 h-4 rounded-full border-2 border-brand-300 border-t-brand-500 spin" /> Connecting to your inbox…
+          </div>
+        )}
+        {stage==='done' && (
+          <div className="space-y-3">
+            <div className="text-sm text-good-600 flex items-center gap-2 bg-good-50 rounded-lg px-3 py-2"><span>✓</span> Found {found} transactions from receipts in the last ~45 days</div>
+            <button onClick={confirmImport} className="w-full rounded-lg bg-brand-500 hover:bg-brand-600 transition-colors text-white font-semibold text-sm py-2.5">Import these transactions</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// COMPONENT — Add transaction modal (manual, one entry at a time)
+// ═════════════════════════════════════════════════════════════════
+function AddTransactionModal({ onClose }) {
+  const { addTransactions } = useFinance();
+  const [date, setDate] = useState(iso(new Date()));
+  const [description, setDescription] = useState('');
+  const [merchant, setMerchant] = useState('');
+  const [amount, setAmount] = useState('');
+  const [type, setType] = useState('debit');
+  const [error, setError] = useState('');
+  const [addedCount, setAddedCount] = useState(0);
+
+  const reset = () => { setDescription(''); setMerchant(''); setAmount(''); };
+
+  const handleAdd = (andClose) => {
+    const amt = Number(amount);
+    if (!description.trim()) { setError('Add a short description.'); return; }
+    if (!amt || amt <= 0) { setError('Enter an amount greater than 0.'); return; }
+    setError('');
+    const raw = { id: nextId('manual'), date, description: description.trim(), amount: amt, type, merchant: merchant.trim() || description.trim() };
+    const c = categorizeTransaction(raw.description, raw.merchant, raw.type);
+    const txn = { ...raw, category: c.category, categoryConfidence: c.confidence, categoryReason: c.reason };
+    addTransactions([txn], 'Added 1 transaction manually');
+    setAddedCount(n => n + 1);
+    if (andClose) { onClose(); } else { reset(); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-ink-900/40 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+      <div className="w-full max-w-md bg-surface border border-line rounded-xl2 shadow-card p-6">
+        <div className="flex items-center justify-between mb-1"><h2 className="font-bold text-lg text-ink-900">Add a transaction</h2><button onClick={onClose} className="text-ink-400 hover:text-ink-700">✕</button></div>
+        <p className="text-ink-500 text-sm mb-5">Enter it by hand — no file or connection needed.</p>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <ProfileField label="Date" value={date} onChange={setDate} type="date" />
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-500 mb-1.5">Type</span>
+              <select value={type} onChange={e=>setType(e.target.value)}
+                className="w-full rounded-lg bg-surface2 border border-line focus:border-brand-500 focus:ring-2 focus:ring-brand-100 focus:outline-none px-3 py-2.5 text-sm text-ink-900">
+                <option value="debit">Debit (money out)</option>
+                <option value="credit">Credit (money in)</option>
+              </select>
+            </label>
+          </div>
+          <ProfileField label="Description" value={description} onChange={setDescription} type="text" />
+          <div className="grid grid-cols-2 gap-3">
+            <ProfileField label="Merchant (optional)" value={merchant} onChange={setMerchant} type="text" />
+            <ProfileField label="Amount (₹)" value={amount} onChange={setAmount} type="number" />
+          </div>
+          {error && <p className="text-xs text-bad-600">{error}</p>}
+          {addedCount > 0 && <p className="text-xs text-good-600">✓ {addedCount} transaction{addedCount===1?'':'s'} added so far this session.</p>}
+          <div className="flex gap-2 pt-1">
+            <button onClick={()=>handleAdd(false)} className="flex-1 rounded-lg bg-surface2 hover:bg-line/60 border border-line transition-colors text-ink-700 font-semibold text-sm py-2.5">Add & enter another</button>
+            <button onClick={()=>handleAdd(true)} className="flex-1 rounded-lg bg-brand-500 hover:bg-brand-600 transition-colors text-white font-semibold text-sm py-2.5">Add & close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// COMPONENT — Layout (app shell: sidebar + top bar)
+// ═════════════════════════════════════════════════════════════════
+function Layout({ view, onChangeView, children, user, onLogout }) {
+  const { state, addUnexpectedExpense, resetData } = useFinance();
+  const [showUpload, setShowUpload] = useState(false);
+  const [showEmailSync, setShowEmailSync] = useState(false);
+  const [showAddTxn, setShowAddTxn] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const pageTitle = view==='dashboard' ? 'Dashboard' : 'Ask Finora';
+
+  return (
+    <div className="h-screen w-full bg-canvas flex overflow-hidden">
+      <aside className="w-[224px] shrink-0 border-r border-line bg-surface flex flex-col py-5 px-3.5">
+        <div className="flex items-center gap-2.5 px-2 mb-8">
+          <div className="w-8 h-8 rounded-xl bg-brand-500 flex items-center justify-center"><span className="text-white text-sm">💠</span></div>
+          <span className="font-extrabold text-base tracking-tight text-ink-900">Finora</span>
+        </div>
+
+        <nav className="space-y-1">
+          <NavItem icon="📊" label="Dashboard" active={view==='dashboard'} onClick={()=>onChangeView('dashboard')} />
+          <NavItem icon="💬" label="Ask Finora" active={view==='chat'} onClick={()=>onChangeView('chat')} />
+        </nav>
+
+        <div className="mt-auto space-y-1">
+          <div className="px-2.5 text-[11px] uppercase tracking-wide font-semibold text-ink-400 mb-1.5 mt-4">Data &amp; sync</div>
+          <SidebarAction icon="➕" label="Add transaction" onClick={()=>setShowAddTxn(true)} />
+          <SidebarAction icon="📄" label="Upload statement" onClick={()=>setShowUpload(true)} />
+          <SidebarAction icon="✉️" label="Connect email" onClick={()=>setShowEmailSync(true)} />
+          <SidebarAction icon="⚠️" label="Simulate surprise expense" tone="bad" onClick={addUnexpectedExpense} />
+          <SidebarAction icon="↺" label="Reset all data" onClick={resetData} />
+          {state.lastUpdated && <div className="px-3 pt-2 text-[11px] text-ink-400">Updated {new Date(state.lastUpdated).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div>}
+        </div>
+      </aside>
+
+      <main className="flex-1 min-w-0 flex flex-col">
+        <header className="h-14 shrink-0 border-b border-line bg-surface flex items-center justify-between px-6">
+          <h1 className="font-bold text-[15px] text-ink-900">{pageTitle}</h1>
+          <div className="relative">
+            <button onClick={()=>setShowUserMenu(v=>!v)} className="flex items-center gap-2 rounded-full pl-1 pr-3 py-1 hover:bg-surface2 transition-colors">
+              <span className="w-7 h-7 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-xs font-bold">{(user && user.email ? user.email[0] : '?').toUpperCase()}</span>
+              <span className="text-xs text-ink-700 font-medium hidden sm:inline">{user ? user.email : ''}</span>
+              <span className="text-ink-400 text-[10px]">▾</span>
+            </button>
+            {showUserMenu && (
+              <div className="absolute right-0 top-11 w-44 bg-surface border border-line rounded-xl shadow-card py-1.5 z-10">
+                <button onClick={onLogout} className="w-full text-left px-3.5 py-2 text-sm text-ink-700 hover:bg-surface2">Log out</button>
+              </div>
+            )}
+          </div>
+        </header>
+        <SnapshotBanner />
+        <div className="flex-1 min-h-0">{children}</div>
+      </main>
+
+      {showAddTxn && <AddTransactionModal onClose={()=>setShowAddTxn(false)} />}
+      {showUpload && <UploadModal onClose={()=>setShowUpload(false)} />}
+      {showEmailSync && <EmailSyncModal onClose={()=>setShowEmailSync(false)} />}
+    </div>
+  );
+}
+function NavItem({ icon, label, active, onClick }) {
+  return <button onClick={onClick} className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2.5 ${active ? 'bg-brand-50 text-brand-700' : 'text-ink-500 hover:bg-surface2 hover:text-ink-900'}`}><span className="text-[15px]">{icon}</span>{label}</button>;
+}
+function SidebarAction({ icon, label, onClick, tone }) {
+  return <button onClick={onClick} className={`w-full text-left px-3 py-2 rounded-lg text-[13px] font-medium transition-colors flex items-center gap-2.5 ${tone==='bad' ? 'text-bad-600 hover:bg-bad-50' : 'text-ink-500 hover:bg-surface2 hover:text-ink-900'}`}><span className="text-[13px]">{icon}</span>{label}</button>;
+}
+</script>
+<script type="text/babel" data-presets="react">
+
+// ═════════════════════════════════════════════════════════════════
+// DASHBOARD PANELS
+// ═════════════════════════════════════════════════════════════════
+function OverviewCards() {
+  const { state } = useFinance();
+  const { totalExpenses } = analyzeCurrentMonth(state.transactions);
+  const savings = state.profile.goal ? state.profile.goal.savedSoFar : 0;
+  const cards = [
+    { label:'Monthly income', value: state.profile.income, icon:'💰' },
+    { label:'Total expenses', value: totalExpenses, icon:'💳' },
+    { label:'Available balance', value: state.profile.balance, icon:'🏦' },
+    { label:'Current savings', value: savings, icon:'🎯', tone:'brand' },
+  ];
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {cards.map(c => (
+        <div key={c.label} className="rounded-xl2 border border-line bg-surface shadow-card px-5 py-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-ink-500 font-medium">{c.label}</span>
+            <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm ${c.tone==='brand' ? 'bg-brand-50' : 'bg-surface2'}`}>{c.icon}</span>
+          </div>
+          <div className={`num text-2xl font-bold ${c.tone==='brand' ? 'text-brand-600' : 'text-ink-900'}`}>{inr(c.value)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const PALETTE = ['#5B63E8','#12B76A','#F79009','#F04438','#3B82F6','#A855F7','#14B8A6','#EC4899','#84CC16','#F97316','#06B6D4'];
+function SpendingChart() {
+  const { state } = useFinance();
+  const { categoryTotals, totalExpenses } = analyzeCurrentMonth(state.transactions);
+  const data = Object.entries(categoryTotals).filter(([,v])=>(v||0)>0).sort((a,b)=>(b[1]||0)-(a[1]||0)).map(([name,value])=>({name,value}));
+  if (!data.length) return <div className="rounded-xl2 border border-line bg-surface shadow-card px-5 py-4 h-full flex items-center justify-center"><span className="text-ink-400 text-sm">No spending data yet this month.</span></div>;
+
+  const total = data.reduce((s,d)=>s+d.value,0);
+  const cx=110, cy=110, rOuter=95, rInner=58;
+  let angle = -90;
+  const arcs = data.map((d,i) => {
+    const sweep = (d.value/total)*360;
+    const startAngle = angle, endAngle = angle + sweep;
+    angle = endAngle;
+    const toXY = (r,a) => { const rad=(a*Math.PI)/180; return [cx+r*Math.cos(rad), cy+r*Math.sin(rad)]; };
+    const [x1,y1] = toXY(rOuter, startAngle), [x2,y2] = toXY(rOuter, endAngle);
+    const [x3,y3] = toXY(rInner, endAngle), [x4,y4] = toXY(rInner, startAngle);
+    const large = sweep > 180 ? 1 : 0;
+    const path = `M ${x1} ${y1} A ${rOuter} ${rOuter} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${rInner} ${rInner} 0 ${large} 0 ${x4} ${y4} Z`;
+    return { path, color: PALETTE[i % PALETTE.length], name:d.name, value:d.value };
+  });
+
+  return (
+    <div className="rounded-xl2 border border-line bg-surface shadow-card px-5 py-4 h-full flex flex-col">
+      <div className="text-xs text-ink-500 font-medium mb-1">Spending breakdown</div>
+      <div className="flex-1 flex items-center gap-6 min-h-[220px]">
+        <svg width="220" height="220" viewBox="0 0 220 220" className="shrink-0">
+          {arcs.map((a,i) => <path key={i} d={a.path} fill={a.color}><title>{a.name}: {inr(a.value)}</title></path>)}
+          <circle cx={cx} cy={cy} r={rInner-2} fill="#FFFFFF" />
+          <text x={cx} y={cy-4} textAnchor="middle" fill="#171A2B" fontSize="14" fontWeight="700" fontFamily="Plus Jakarta Sans">{inr(total)}</text>
+          <text x={cx} y={cy+14} textAnchor="middle" fill="#8D92A8" fontSize="10">total</text>
+        </svg>
+        <div className="flex-1 space-y-1.5 overflow-y-auto max-h-[220px] pr-1">
+          {arcs.map((a,i) => (
+            <div key={i} className="flex items-center justify-between text-xs">
+              <span className="flex items-center gap-2 text-ink-700"><span className="w-2 h-2 rounded-full shrink-0" style={{background:a.color}} />{a.name}</span>
+              <span className="num text-ink-900 font-medium">{inr(a.value)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  const map = { under:{text:'On track',cls:'text-good-600 bg-good-50'}, near:{text:'Near limit',cls:'text-warn-600 bg-warn-50'}, over:{text:'Over budget',cls:'text-bad-600 bg-bad-50'} };
+  const s = map[status];
+  return <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${s.cls}`}>{s.text}</span>;
+}
+function ProgressBar({ pct: p, status }) {
+  const color = status==='over' ? 'bg-bad-500' : status==='near' ? 'bg-warn-500' : 'bg-good-500';
+  return <div className="h-1.5 rounded-full bg-surface2 overflow-hidden"><div className={`h-full ${color} transition-all duration-500`} style={{width:`${Math.min(100,p)}%`}} /></div>;
+}
+function BudgetHealth() {
+  const { state } = useFinance();
+  const summary = totalBudgetSummary(state.transactions, state.profile);
+  return (
+    <div className="rounded-xl2 border border-line bg-surface shadow-card px-5 py-4">
+      <div className="flex items-baseline justify-between mb-3"><div className="text-xs text-ink-500 font-medium">Budget health</div><StatusBadge status={summary.status} /></div>
+      <div className="flex items-baseline gap-2 mb-2"><span className="num text-2xl font-bold text-ink-900">{inr(summary.actual)}</span><span className="text-ink-400 text-sm">/ {inr(summary.budget)}</span></div>
+      <ProgressBar pct={summary.pctUsed} status={summary.status} />
+      <div className="text-xs text-ink-500 mt-2">{summary.remaining>=0 ? <React.Fragment>{inr(summary.remaining)} remaining this month</React.Fragment> : <span className="text-bad-600">{inr(Math.abs(summary.remaining))} over budget</span>}</div>
+      {state.budgets.filter(b=>b.status!=='under').length > 0 && (
+        <div className="mt-4 pt-4 border-t border-line space-y-2.5">
+          <div className="text-[11px] text-ink-400 font-medium mb-1">Categories to watch</div>
+          {state.budgets.filter(b=>b.status!=='under').slice(0,4).map(b => (
+            <div key={b.category} className="flex items-center justify-between text-sm">
+              <span className="text-ink-700">{b.category}</span>
+              <span className="num flex items-center gap-2"><span className={`font-medium ${b.status==='over' ? 'text-bad-600' : 'text-warn-600'}`}>{pct(b.pctUsed)}</span><span className="text-ink-400 text-xs">{inr(b.actual)}/{inr(b.budget)}</span></span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+function ObligationsPanel() {
+  const { state } = useFinance();
+  return (
+    <div className="rounded-xl2 border border-line bg-surface shadow-card px-5 py-4">
+      <div className="text-xs text-ink-500 font-medium mb-3">Upcoming obligations</div>
+      {!state.obligations.length ? <div className="text-sm text-ink-400 py-4">No obligations due in the next 30 days.</div> : (
+        <div>{state.obligations.map(o => (
+          <div key={o.id} className="flex items-center justify-between py-2.5 border-b border-line last:border-b-0">
+            <div><div className="text-sm text-ink-900 font-medium">{o.name}</div><div className="text-xs text-ink-400">{formatDate(o.dueDate)}</div></div>
+            <div className="text-right"><div className="num text-sm text-ink-900 font-medium">{inr(o.amount)}</div><div className={`text-xs ${o.status==='overdue' ? 'text-bad-600' : o.status==='due-soon' ? 'text-warn-600' : 'text-ink-400'}`}>{relativeDays(o.daysRemaining)}</div></div>
+          </div>
+        ))}</div>
+      )}
+    </div>
+  );
+}
+function RecurringPanel() {
+  const { state } = useFinance();
+  const total = state.recurring.reduce((s,r)=>s+r.amount,0);
+  return (
+    <div className="rounded-xl2 border border-line bg-surface shadow-card px-5 py-4">
+      <div className="flex items-baseline justify-between mb-3"><div className="text-xs text-ink-500 font-medium">Recurring payments</div><div className="num text-xs text-ink-400">{inr(total)}/mo</div></div>
+      {!state.recurring.length ? <div className="text-sm text-ink-400 py-4">No recurring payments detected yet.</div> : (
+        <div>{state.recurring.map(r => (
+          <div key={r.merchant} className="flex items-center justify-between py-2.5 border-b border-line last:border-b-0">
+            <div><div className="text-sm text-ink-900 font-medium">{r.merchant}</div><div className="text-xs text-ink-400 capitalize">{r.frequency} · {r.category}</div></div>
+            <div className="num text-sm text-ink-900 font-medium">{inr(r.amount)}</div>
+          </div>
+        ))}</div>
+      )}
+    </div>
+  );
+}
+function GoalCard() {
+  const { state } = useFinance();
+  const goal = calculateGoalProgress(state.transactions, state.profile);
+  if (!goal) return <div className="rounded-xl2 border border-line bg-surface shadow-card px-5 py-4 h-full flex items-center justify-center text-sm text-ink-400">No savings goal set.</div>;
+  const radius=54, circumference=2*Math.PI*radius, progress=Math.min(100,goal.progressPct), offset=circumference*(1-progress/100);
+  return (
+    <div className="rounded-xl2 border border-line bg-gradient-to-br from-brand-50 to-surface shadow-card px-6 py-5 h-full">
+      <div className="text-xs text-ink-500 font-medium mb-4">Financial goal</div>
+      <div className="flex items-center gap-6">
+        <div className="relative w-32 h-32 shrink-0">
+          <svg width="128" height="128" viewBox="0 0 128 128" className="-rotate-90">
+            <circle cx="64" cy="64" r={radius} fill="none" stroke="#E7E9F2" strokeWidth="10" />
+            <circle cx="64" cy="64" r={radius} fill="none" stroke="#5B63E8" strokeWidth="10" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={offset} style={{transition:'stroke-dashoffset 0.6s ease'}} />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center"><span className="font-extrabold text-2xl text-brand-600">{pct(progress)}</span><span className="text-[10px] text-ink-400">funded</span></div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-lg text-ink-900 truncate">{goal.goalName}</div>
+          <div className="num text-sm text-ink-700 mt-1">{inr(goal.savedSoFar)} <span className="text-ink-400">of {inr(goal.targetAmount)}</span></div>
+          <div className="text-xs text-ink-500 mt-3">{goal.monthsRemaining} month{goal.monthsRemaining===1?'':'s'} remaining</div>
+          <div className="text-xs text-ink-500">Needs <span className="num text-ink-700 font-medium">{inr(goal.requiredMonthlySaving)}</span>/mo</div>
+        </div>
+      </div>
+      <div className={`mt-4 pt-4 border-t border-line text-xs font-medium ${goal.onTrack ? 'text-good-600' : 'text-bad-600'}`}>
+        {goal.onTrack ? `On track — projected net saving of ${inr(goal.currentMonthNetSaving)} this month meets pace.` : `Behind pace by about ${inr(Math.abs(goal.gapPerMonth))}/month based on current spending.`}
+      </div>
+    </div>
+  );
+}
+const INSIGHT_DOT = { positive:'bg-good-500', warning:'bg-bad-500', neutral:'bg-info-500' };
+function InsightsPanel() {
+  const { state } = useFinance();
+  return (
+    <div className="rounded-xl2 border border-line bg-surface shadow-card px-5 py-4">
+      <div className="text-xs text-ink-500 font-medium mb-3">✨ AI insights</div>
+      {!state.insights.length ? <div className="text-sm text-ink-400 py-4">Insights will appear here once you have transaction data.</div> : (
+        <div className="space-y-3">{state.insights.map(insight => (
+          <div key={insight.id} className="flex gap-2.5 fade-in">
+            <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${INSIGHT_DOT[insight.kind]}`} />
+            <span className="text-sm text-ink-700 leading-relaxed">{insight.text}</span>
+          </div>
+        ))}</div>
+      )}
+    </div>
+  );
+}
+
+function Dashboard({ onAskFinora }) {
+  const { state } = useFinance();
+  return (
+    <div className="h-full overflow-y-auto px-8 py-6">
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="font-extrabold text-xl text-ink-900">Financial overview</h1>
+          <p className="text-sm text-ink-500 mt-1">{state.transactions.length ? `${state.transactions.length} transaction${state.transactions.length===1?'':'s'} on record` : 'No transactions yet — use "Add transaction" in the sidebar to enter your first one, or upload a statement.'}</p>
+        </div>
+        <button onClick={onAskFinora} className="rounded-lg bg-brand-500 hover:bg-brand-600 transition-colors text-white text-sm font-semibold px-4 py-2 shrink-0 shadow-pop">Ask Finora →</button>
+      </div>
+      <div className="space-y-5">
+        <OverviewCards />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <div className="lg:col-span-2"><SpendingChart /></div>
+          <GoalCard />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <BudgetHealth /><ObligationsPanel /><RecurringPanel />
+        </div>
+        <InsightsPanel />
+      </div>
+    </div>
+  );
+}
+</script>
+<script type="text/babel" data-presets="react">
+
+// ═════════════════════════════════════════════════════════════════
+// COMPONENT — Finora Activity panel
+// ═════════════════════════════════════════════════════════════════
+function StatusIcon({ status }) {
+  if (status==='done') return <span className="w-4 h-4 rounded-full bg-good-50 text-good-600 flex items-center justify-center text-[10px] shrink-0">✓</span>;
+  if (status==='active') return <span className="w-2 h-2 rounded-full bg-brand-500 pulse-dot shrink-0 ml-1 mr-1" />;
+  return <span className="w-2 h-2 rounded-full bg-surface2 border border-line shrink-0 ml-1 mr-1" />;
+}
+function ActivityPanel({ steps }) {
+  return (
+    <div className="rounded-xl border border-line bg-surface2 px-4 py-3 space-y-2">
+      <div className="text-[11px] text-ink-500 font-semibold mb-1">Finora Activity</div>
+      {steps.map(step => (
+        <div key={step.id} className="flex items-center gap-2.5 text-sm">
+          <StatusIcon status={step.status} />
+          <span className={step.status==='done' ? 'text-ink-400 line-through decoration-ink-300' : step.status==='active' ? 'text-ink-900 font-medium' : 'text-ink-400'}>
+            {step.label}{step.status==='active' ? '…' : ''}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// COMPONENT — Ask Finora chat
+// ═════════════════════════════════════════════════════════════════
+const SUGGESTIONS = ['Can I spend ₹5,000 this month?','Where am I overspending?','What subscriptions do I have?','What bills are coming up?','Am I on track for my savings goal?','What changed compared with last month?'];
+
+function Chat() {
+  const { state, recordTurn } = useFinance();
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && typeof el.scrollTo === 'function') el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    else if (el) el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
+  const ask = async (question) => {
+    if (!question.trim() || busy) return;
+    setBusy(true);
+    const userMsg = { id:`u-${Date.now()}`, role:'user', text:question };
+    const agentMsgId = `a-${Date.now()}`;
+    setMessages(prev => [...prev, userMsg, { id:agentMsgId, role:'agent', pending:true, liveSteps:[] }]);
+    setInput('');
+    const turn = await runAgent(question, state, (steps) => {
+      setMessages(prev => prev.map(m => m.id===agentMsgId ? { ...m, liveSteps: steps } : m));
+    });
+    setMessages(prev => prev.map(m => m.id===agentMsgId ? { ...m, pending:false, turn } : m));
+    recordTurn(turn);
+    setBusy(false);
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-canvas">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-8 py-7">
+        {!messages.length && (
+          <div className="max-w-2xl mx-auto text-center pt-16">
+            <h1 className="font-extrabold text-2xl text-ink-900 mb-2">Ask Finora</h1>
+            <p className="text-ink-500 text-sm mb-8">Ask about your spending, subscriptions, bills, or savings goal — Finora reasons over your actual recorded data, not guesses.</p>
+            <div className="grid grid-cols-2 gap-2.5 text-left">
+              {SUGGESTIONS.map(s => <button key={s} onClick={()=>ask(s)} className="rounded-xl border border-line bg-surface hover:border-brand-300 hover:bg-brand-50/50 transition-colors px-4 py-3 text-sm text-ink-700 hover:text-ink-900 shadow-card">{s}</button>)}
+            </div>
+          </div>
+        )}
+        <div className="max-w-2xl mx-auto space-y-5">
+          {messages.map(m => (
+            <div key={m.id} className={m.role==='user' ? 'flex justify-end' : 'flex justify-start'}>
+              {m.role==='user' ? (
+                <div className="bg-brand-500 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm max-w-[85%] shadow-pop">{m.text}</div>
+              ) : (
+                <div className="w-full space-y-2.5">
+                  {m.pending && m.liveSteps && <ActivityPanel steps={m.liveSteps} />}
+                  {m.turn && (
+                    <div className="fade-in space-y-2.5">
+                      <details className="group">
+                        <summary className="list-none cursor-pointer text-[11px] text-ink-400 hover:text-ink-600 select-none">▸ Finora Activity ({m.turn.toolsUsed.length} tool{m.turn.toolsUsed.length===1?'':'s'} used)</summary>
+                        <div className="mt-2"><ActivityPanel steps={m.turn.activitySteps} /></div>
+                      </details>
+                      <div className="rounded-2xl rounded-tl-sm border border-line bg-surface shadow-card px-4 py-3 text-sm text-ink-900 leading-relaxed">{m.turn.answer}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="border-t border-line bg-surface px-8 py-4">
+        <form onSubmit={e=>{e.preventDefault(); ask(input);}} className="max-w-2xl mx-auto flex items-center gap-2.5">
+          <input value={input} onChange={e=>setInput(e.target.value)} placeholder="Ask about your finances…"
+            className="flex-1 rounded-lg bg-surface2 border border-line focus:border-brand-500 focus:ring-2 focus:ring-brand-100 focus:outline-none px-4 py-2.5 text-sm text-ink-900" disabled={busy} />
+          <button type="submit" disabled={busy || !input.trim()} className="rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-white font-semibold text-sm px-5 py-2.5">Ask</button>
+        </form>
+        <p className="max-w-2xl mx-auto text-[11px] text-ink-400 mt-2">Finora is decision-support software, not a financial advisor. It doesn't give investment or stock advice.</p>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// COMPONENT — brief loading screen while demo data auto-provisions
+// ═════════════════════════════════════════════════════════════════
+function LoadingScreen() {
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center bg-canvas">
+      <div className="flex flex-col items-center gap-3">
+        <span className="w-8 h-8 rounded-full border-2 border-brand-200 border-t-brand-500 spin" />
+        <span className="text-sm text-ink-500 font-medium">Setting up your dashboard…</span>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// APP ROOT
+// ═════════════════════════════════════════════════════════════════
+function AppShell() {
+  const { state } = useFinance();
+  const [view, setView] = useState('dashboard');
+  const { user, login, logout } = useAuth();
+
+  // Signing in shows the "Set up your finances" screen so the person enters
+  // their own data from zero (or picks demo/email/upload) instead of the
+  // dashboard being auto-populated with the demo dataset.
+  if (!user) return <Login onLogin={login} />;
+  if (!state.onboarded) return <ConnectData />;
+  return (
+    <Layout view={view} onChangeView={setView} user={user} onLogout={logout}>
+      {view === 'dashboard' ? <Dashboard onAskFinora={()=>setView('chat')} /> : <Chat />}
+    </Layout>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<FinanceProvider><AppShell /></FinanceProvider>);
+</script>
+</body>
+</html>
