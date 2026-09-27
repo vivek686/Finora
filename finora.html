@@ -280,6 +280,56 @@ function analyzePreviousMonth(transactions) {
 }
 
 // ═════════════════════════════════════════════════════════════════
+// TOOL 9 — Behavioral Spending Insights (measurable patterns only)
+// ═════════════════════════════════════════════════════════════════
+function sanitizeTransactionContext(value) {
+  return String(value || '').trim().slice(0, 240);
+}
+function analyzeBehavior(transactions) {
+  const debits = transactions.filter(t => t.type === 'debit');
+  if (!debits.length) return { transactionCount:0, indicators:[], contextCount:0, summary:'Add transactions to see measurable spending patterns.' };
+  const total = debits.reduce((s,t)=>s+t.amount,0);
+  const byCategory = {}, byMerchant = {}, byDay = {};
+  debits.forEach(t => {
+    byCategory[t.category] = (byCategory[t.category] || 0) + t.amount;
+    const merchant = (t.merchant || t.description).trim().toLowerCase();
+    byMerchant[merchant] = (byMerchant[merchant] || 0) + t.amount;
+    const day = new Date(t.date).getDay();
+    byDay[day] = (byDay[day] || 0) + t.amount;
+  });
+  const indicators = [];
+  const topCategory = Object.entries(byCategory).sort((a,b)=>b[1]-a[1])[0];
+  if (topCategory && total > 0 && topCategory[1] / total >= 0.35) {
+    indicators.push({ id:'category-concentration', label:'Category concentration', value:`${Math.round(topCategory[1]/total*100)}%`, detail:`${topCategory[0]} accounts for the largest share of recorded debit spend.`, kind:'neutral' });
+  }
+  const small = debits.filter(t => t.amount <= 500);
+  if (small.length >= 5) {
+    indicators.push({ id:'small-purchase-frequency', label:'Small-purchase frequency', value:`${small.length}`, detail:`${small.length} recorded debits were ₹500 or less; together they total ${inr(small.reduce((s,t)=>s+t.amount,0))}.`, kind:'info' });
+  }
+  const weekendTotal = (byDay[0] || 0) + (byDay[6] || 0);
+  if (total > 0 && weekendTotal / total >= 0.3) {
+    indicators.push({ id:'weekend-share', label:'Weekend share', value:`${Math.round(weekendTotal/total*100)}%`, detail:`Recorded weekend debits account for ${Math.round(weekendTotal/total*100)}% of debit spend.`, kind:'info' });
+  }
+  const merchants = Object.entries(byMerchant).sort((a,b)=>b[1]-a[1]);
+  if (merchants.length && total > 0 && merchants[0][1] / total >= 0.25) {
+    indicators.push({ id:'merchant-concentration', label:'Merchant concentration', value:`${Math.round(merchants[0][1]/total*100)}%`, detail:`One merchant accounts for the largest share of recorded debit spend.`, kind:'neutral' });
+  }
+  const withContext = debits.filter(t => sanitizeTransactionContext(t.context)).length;
+  if (withContext) indicators.push({ id:'context-coverage', label:'Context coverage', value:`${Math.round(withContext/debits.length*100)}%`, detail:`${withContext} of ${debits.length} debit transactions include optional user-provided context.`, kind:'good' });
+  const top = topCategory ? `Most recorded debit spend is in ${topCategory[0]} (${inr(topCategory[1])}, ${Math.round(topCategory[1]/total*100)}%).` : 'Recorded debit spend is spread across categories.';
+  const contextNotes = debits.filter(t => sanitizeTransactionContext(t.context)).slice(-3).map(t => sanitizeTransactionContext(t.context));
+  const actions = [];
+  if (indicators.some(i => i.id === 'category-concentration')) actions.push('Compare the largest category with its budget before making the next purchase.');
+  if (indicators.some(i => i.id === 'small-purchase-frequency')) actions.push('Review small purchases as a group rather than judging any single transaction.');
+  if (indicators.some(i => i.id === 'weekend-share')) actions.push('Check weekend spend against your remaining weekly budget.');
+  return { transactionCount:debits.length, totalDebits:total, indicators:indicators.slice(0,4), contextCount:withContext, contextNotes, actions, summary:top };
+}
+function generateBehaviorInsights(transactions) {
+  const analysis = analyzeBehavior(transactions);
+  return analysis.indicators.map(i => ({ ...i, createdAt:new Date().toISOString() }));
+}
+
+// ═════════════════════════════════════════════════════════════════
 // TOOL 3 — Recurring Payment Detector
 // ═════════════════════════════════════════════════════════════════
 function detectRecurringPayments(transactions) {
@@ -522,6 +572,7 @@ function parseTransactionsCsv(csvText) {
   const typeKey = findKey(first, ['type','transaction type','dr/cr']);
   const merchantKey = findKey(first, ['merchant','payee']);
   const categoryKey = findKey(first, ['category']);
+  const contextKey = findKey(first, ['context','user context','transaction context','note','notes']);
   if (!dateKey || !descKey || !amountKey) {
     const missing = [!dateKey&&'date', !descKey&&'description', !amountKey&&'amount'].filter(Boolean);
     return { transactions:[], errors:[{row:0,message:`Missing required column(s): ${missing.join(', ')}. Expected headers like Date, Description, Amount.`}], duplicatesSkipped:0, rowsRead:rows.length };
@@ -543,7 +594,7 @@ function parseTransactionsCsv(csvText) {
     const presetCategory = categoryKey ? (row[categoryKey]||'').trim() : undefined;
     const cat = presetCategory ? { category: presetCategory, confidence:1, reason:'Provided in source file.' } : categorizeTransaction(rawDesc, merchant, parsedAmount.type);
     transactions.push({ id: nextId('csv'), date, description: rawDesc, amount: parsedAmount.amount, type: parsedAmount.type,
-      merchant, category: cat.category, categoryConfidence: cat.confidence, categoryReason: cat.reason });
+      merchant, context: sanitizeTransactionContext(contextKey ? row[contextKey] : ''), category: cat.category, categoryConfidence: cat.confidence, categoryReason: cat.reason });
   });
   return { transactions, errors, duplicatesSkipped, rowsRead: rows.length };
 }
@@ -565,6 +616,7 @@ function classifyIntent(question) {
   if (/overspend|over budget|where.*(spending too much|overspending)/.test(q)) matches.push({ intent:'overspending', confidence:0.85 });
   if (/compare|last month|previous month|changed|vs\.?|versus/.test(q)) matches.push({ intent:'month_comparison', confidence:0.8 });
   if (/review|unusual|flag|anomal|suspicious|weird/.test(q)) matches.push({ intent:'review_expenses', confidence:0.8 });
+  if (/behavior|pattern|habit|frequent|small purchase|weekend spending|spending mix/.test(q)) matches.push({ intent:'behavioral_patterns', confidence:0.85 });
   const category = CATEGORY_WORDS.find(c => q.includes(c));
   if (category && /spen[dt]|cost|paid|expense/.test(q)) matches.push({ intent:'category_spend', confidence:0.85, extractedCategory: category.charAt(0).toUpperCase()+category.slice(1) });
   if (!matches.length) matches.push({ intent:'general_summary', confidence:0.5, extractedAmount });
@@ -578,13 +630,15 @@ const TOOL_LABELS = {
   TransactionAnalyzer:'Analyzing your transactions', RecurringDetector:'Checking recurring payments',
   AnomalyDetector:'Scanning for unusual spending', BudgetAnalyzer:'Comparing spending against your budget',
   ObligationAnalyzer:'Checking upcoming obligations', GoalCalculator:'Calculating goal impact', ImpactCalculator:'Simulating spending impact',
+  BehavioralAnalyzer:'Measuring spending patterns',
 };
 const INTENT_TOOLS = {
   category_spend:['TransactionAnalyzer'], subscriptions:['RecurringDetector'], upcoming_bills:['ObligationAnalyzer'],
   goal_progress:['TransactionAnalyzer','GoalCalculator'],
   can_i_spend:['BudgetAnalyzer','ObligationAnalyzer','GoalCalculator','ImpactCalculator'],
   overspending:['BudgetAnalyzer','AnomalyDetector'], month_comparison:['TransactionAnalyzer'],
-  review_expenses:['AnomalyDetector','BudgetAnalyzer'], general_summary:['TransactionAnalyzer','BudgetAnalyzer','ObligationAnalyzer'],
+  review_expenses:['AnomalyDetector','BudgetAnalyzer'], behavioral_patterns:['BehavioralAnalyzer'],
+  general_summary:['TransactionAnalyzer','BudgetAnalyzer','ObligationAnalyzer','BehavioralAnalyzer'],
 };
 function buildSteps(tools) {
   return [{id:'understand',label:'Understanding request',status:'pending'},
@@ -633,6 +687,8 @@ async function runAgent(question, state, onStep) {
       const recurring = toolResults.recurring || detectRecurringPayments(state.transactions);
       const obligations = toolResults.obligations || analyzeObligations(recurring);
       toolResults.spendingImpact = calculateSpendingImpact(amount, state.transactions, state.profile, obligations);
+    } else if (tool==='BehavioralAnalyzer') {
+      toolResults.behavior = analyzeBehavior(state.transactions);
     }
     setStep(tool,'done');
   }
@@ -707,6 +763,14 @@ function composeTemplateAnswer(intents, results, state, matches) {
     if (!anomalies || !anomalies.length) return 'Nothing stands out — I did not detect any unusual spending patterns in your recorded transactions.';
     return `I'd suggest reviewing ${anomalies.length} transaction${anomalies.length>1?'s':''}: ${anomalies.map(a=>a.message).join(' ')}`;
   }
+  if (intents.includes('behavioral_patterns')) {
+    const behavior = results.behavior || analyzeBehavior(state.transactions);
+    if (!behavior.transactionCount) return behavior.summary;
+    const indicators = behavior.indicators.map(i=>`${i.label}: ${i.detail}`).join(' ');
+    const context = behavior.contextNotes && behavior.contextNotes.length ? ` User-provided context available for comparison includes: ${behavior.contextNotes.join('; ')}.` : '';
+    const action = behavior.actions && behavior.actions.length ? ` Decision support: ${behavior.actions[0]}` : '';
+    return `${behavior.summary} ${indicators || 'No strong measurable pattern crossed the current thresholds.'}${context}${action} These are descriptive signals from recorded transactions, not conclusions about how you felt or why you spent.`;
+  }
   if (intents.includes('category_spend')) {
     const analysis = results.transactionAnalysis;
     const category = matches.find(m=>m.extractedCategory) ? matches.find(m=>m.extractedCategory).extractedCategory : undefined;
@@ -719,6 +783,7 @@ function composeTemplateAnswer(intents, results, state, matches) {
     analysis ? `This month you've spent ${inr(analysis.totalExpenses)} against income of ${inr(analysis.totalIncome)}.` : '',
     budgetSummary ? `That's ${pct(budgetSummary.pctUsed)} of your ${inr(budgetSummary.budget)} monthly budget, with ${inr(Math.max(0,budgetSummary.remaining))} remaining.` : '',
     obligations && obligations.length ? `You have ${obligations.length} upcoming obligation${obligations.length>1?'s':''} totaling ${inr(totalUpcomingAmount(obligations))}.` : '',
+    results.behavior ? results.behavior.summary : '',
   ].filter(Boolean);
   return bits.join(' ') || "Ask me about your spending, subscriptions, bills, or savings goal and I'll analyze your data.";
 }
@@ -734,7 +799,7 @@ const DEMO_EMAIL = 'demo@finora.app';
 const DEMO_PASSWORD = 'finora123';
 
 const EMPTY_PROFILE = { income:0, balance:0, monthlyBudget:0, categoryBudgets:{}, goal:null };
-const initialState = { onboarded:false, profile: EMPTY_PROFILE, transactions:[], recurring:[], obligations:[], budgets:[], anomalies:[], insights:[], history:[], snapshots:[], lastUpdated:null };
+const initialState = { onboarded:false, profile: EMPTY_PROFILE, transactions:[], recurring:[], obligations:[], budgets:[], anomalies:[], insights:[], behaviorInsights:[], history:[], snapshots:[], lastUpdated:null };
 
 function snapshotOf(state, label) {
   const summary = totalBudgetSummary(state.transactions, state.profile);
@@ -750,7 +815,8 @@ function recompute(state) {
   const budgets = analyzeBudget(state.transactions, state.profile);
   const obligations = analyzeObligations(recurring);
   const insights = generateInsights(state.transactions, state.profile);
-  return { ...state, recurring, anomalies, budgets, obligations, insights, lastUpdated: new Date().toISOString() };
+  const behaviorInsights = generateBehaviorInsights(state.transactions);
+  return { ...state, recurring, anomalies, budgets, obligations, insights, behaviorInsights, lastUpdated: new Date().toISOString() };
 }
 function reducer(state, action) {
   switch (action.type) {
@@ -785,7 +851,10 @@ function FinanceProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState, (init) => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) { const parsed = JSON.parse(saved); if (parsed && parsed.onboarded) return parsed; }
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.onboarded) return { ...parsed, behaviorInsights: parsed.behaviorInsights || generateBehaviorInsights(parsed.transactions || []) };
+      }
     } catch (e) { /* ignore corrupt storage */ }
     return init;
   });
@@ -1174,7 +1243,7 @@ function UploadModal({ onClose }) {
     <div className="fixed inset-0 bg-ink-900/40 backdrop-blur-sm flex items-center justify-center z-50 px-4">
       <div className="w-full max-w-lg bg-surface border border-line rounded-xl2 shadow-card p-6">
         <div className="flex items-center justify-between mb-1"><h2 className="font-bold text-lg text-ink-900">Upload a statement</h2><button onClick={onClose} className="text-ink-400 hover:text-ink-700">✕</button></div>
-        <p className="text-ink-500 text-sm mb-5">CSV with Date, Description, Amount columns (Type, Merchant, Category optional).</p>
+        <p className="text-ink-500 text-sm mb-5">CSV with Date, Description, Amount columns (Type, Merchant, Category, Context optional). Context is stored locally and used only to explain patterns.</p>
         <div className="border border-dashed border-ink-400/40 rounded-lg px-5 py-8 text-center cursor-pointer hover:border-brand-400 transition-colors bg-surface2"
           onClick={()=>inputRef.current && inputRef.current.click()}
           onDragOver={e=>e.preventDefault()}
@@ -1263,19 +1332,20 @@ function AddTransactionModal({ onClose }) {
   const [date, setDate] = useState(iso(new Date()));
   const [description, setDescription] = useState('');
   const [merchant, setMerchant] = useState('');
+  const [context, setContext] = useState('');
   const [amount, setAmount] = useState('');
   const [type, setType] = useState('debit');
   const [error, setError] = useState('');
   const [addedCount, setAddedCount] = useState(0);
 
-  const reset = () => { setDescription(''); setMerchant(''); setAmount(''); };
+  const reset = () => { setDescription(''); setMerchant(''); setAmount(''); setContext(''); };
 
   const handleAdd = (andClose) => {
     const amt = Number(amount);
     if (!description.trim()) { setError('Add a short description.'); return; }
     if (!amt || amt <= 0) { setError('Enter an amount greater than 0.'); return; }
     setError('');
-    const raw = { id: nextId('manual'), date, description: description.trim(), amount: amt, type, merchant: merchant.trim() || description.trim() };
+    const raw = { id: nextId('manual'), date, description: description.trim(), amount: amt, type, merchant: merchant.trim() || description.trim(), context: sanitizeTransactionContext(context) };
     const c = categorizeTransaction(raw.description, raw.merchant, raw.type);
     const txn = { ...raw, category: c.category, categoryConfidence: c.confidence, categoryReason: c.reason };
     addTransactions([txn], 'Added 1 transaction manually');
@@ -1305,6 +1375,13 @@ function AddTransactionModal({ onClose }) {
             <ProfileField label="Merchant (optional)" value={merchant} onChange={setMerchant} type="text" />
             <ProfileField label="Amount (₹)" value={amount} onChange={setAmount} type="number" />
           </div>
+          <label className="block">
+            <span className="block text-xs font-medium text-ink-500 mb-1.5">Context (optional)</span>
+            <textarea value={context} onChange={e=>setContext(e.target.value.slice(0,240))} maxLength="240" rows="2"
+              placeholder="What was this for? e.g. annual travel booking or shared dinner"
+              className="w-full rounded-lg bg-surface2 border border-line focus:border-brand-500 focus:ring-2 focus:ring-brand-100 focus:outline-none px-3 py-2.5 text-sm text-ink-900 resize-none" />
+            <span className="text-[11px] text-ink-400">Optional factual context only. Avoid passwords, account numbers, or sensitive personal details.</span>
+          </label>
           {error && <p className="text-xs text-bad-600">{error}</p>}
           {addedCount > 0 && <p className="text-xs text-good-600">✓ {addedCount} transaction{addedCount===1?'':'s'} added so far this session.</p>}
           <div className="flex gap-2 pt-1">
@@ -1559,8 +1636,11 @@ function InsightsPanel() {
   const { state } = useFinance();
   return (
     <div className="rounded-xl2 border border-line bg-surface shadow-card px-5 py-4">
-      <div className="text-xs text-ink-500 font-medium mb-3">✨ AI insights</div>
-      {!state.insights.length ? <div className="text-sm text-ink-400 py-4">Insights will appear here once you have transaction data.</div> : (
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs text-ink-500 font-medium">Spending updates</div>
+        <span className="text-[11px] text-ink-400">Based on your recorded transactions</span>
+      </div>
+      {!state.insights.length ? <div className="text-sm text-ink-400 py-4">Updates will appear here once you have transaction data.</div> : (
         <div className="space-y-3">{state.insights.map(insight => (
           <div key={insight.id} className="flex gap-2.5 fade-in">
             <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${INSIGHT_DOT[insight.kind]}`} />
@@ -1572,16 +1652,52 @@ function InsightsPanel() {
   );
 }
 
+function BehavioralInsightsPanel({ onAskFinora }) {
+  const { state } = useFinance();
+  const behavior = analyzeBehavior(state.transactions);
+  return (
+    <div className="rounded-xl2 border border-line bg-surface shadow-card px-5 py-4">
+      <div className="flex items-start justify-between gap-4 mb-2">
+        <div>
+          <div className="text-xs text-ink-500 font-medium">Spending patterns</div>
+          <div className="text-[11px] text-ink-400 mt-1">Measured from transaction frequency, mix, timing, and optional context.</div>
+        </div>
+        <button onClick={onAskFinora} className="text-xs text-brand-600 hover:text-brand-700 font-semibold shrink-0">Ask about patterns →</button>
+      </div>
+      <p className="text-sm text-ink-700 leading-relaxed mb-3">{behavior.summary}</p>
+      {!behavior.indicators.length ? (
+        <div className="rounded-lg bg-surface2 px-3 py-2 text-xs text-ink-400">More recorded transactions will make these signals more useful.</div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {behavior.indicators.map(i => (
+            <div key={i.id} className="rounded-lg border border-line bg-surface2 px-3 py-2">
+              <div className="flex items-center justify-between gap-2"><span className="text-xs font-semibold text-ink-700">{i.label}</span><span className="num text-xs font-bold text-brand-600">{i.value}</span></div>
+              <div className="text-[11px] text-ink-500 mt-1 leading-relaxed">{i.detail}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {behavior.actions && behavior.actions.length > 0 && (
+        <div className="mt-3 rounded-lg bg-brand-50 border border-brand-100 px-3 py-2">
+          <div className="text-[11px] font-semibold text-brand-700">Worth checking</div>
+          <div className="text-xs text-ink-700 mt-1">{behavior.actions[0]}</div>
+        </div>
+      )}
+      <div className="text-[11px] text-ink-400 mt-3">Privacy: transaction context stays in this browser demo; it is not sent to an external AI or backend.</div>
+    </div>
+  );
+}
+
 function Dashboard({ onAskFinora }) {
   const { state } = useFinance();
   return (
     <div className="h-full overflow-y-auto px-8 py-6">
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="font-extrabold text-xl text-ink-900">Financial overview</h1>
-          <p className="text-sm text-ink-500 mt-1">{state.transactions.length ? `${state.transactions.length} transaction${state.transactions.length===1?'':'s'} on record` : 'No transactions yet — use "Add transaction" in the sidebar to enter your first one, or upload a statement.'}</p>
+          <h1 className="font-extrabold text-xl text-ink-900">Your money at a glance</h1>
+          <p className="text-sm text-ink-500 mt-1">{state.transactions.length ? `${state.transactions.length} transaction${state.transactions.length===1?'':'s'} recorded` : 'No transactions yet — add one in the sidebar or upload a statement.'}</p>
         </div>
-        <button onClick={onAskFinora} className="rounded-lg bg-brand-500 hover:bg-brand-600 transition-colors text-white text-sm font-semibold px-4 py-2 shrink-0 shadow-pop">Ask Finora →</button>
+        <button onClick={onAskFinora} className="rounded-lg border border-brand-200 bg-brand-50 hover:bg-brand-100 transition-colors text-brand-700 text-sm font-semibold px-4 py-2 shrink-0">Review my spending</button>
       </div>
       <div className="space-y-5">
         <OverviewCards />
@@ -1593,6 +1709,7 @@ function Dashboard({ onAskFinora }) {
           <BudgetHealth /><ObligationsPanel /><RecurringPanel />
         </div>
         <InsightsPanel />
+        <BehavioralInsightsPanel onAskFinora={onAskFinora} />
       </div>
     </div>
   );
@@ -1627,7 +1744,7 @@ function ActivityPanel({ steps }) {
 // ═════════════════════════════════════════════════════════════════
 // COMPONENT — Ask Finora chat
 // ═════════════════════════════════════════════════════════════════
-const SUGGESTIONS = ['Can I spend ₹5,000 this month?','Where am I overspending?','What subscriptions do I have?','What bills are coming up?','Am I on track for my savings goal?','What changed compared with last month?'];
+const SUGGESTIONS = ['Can I spend ₹5,000 this month?','Where am I overspending?','What subscriptions do I have?','What bills are coming up?','Am I on track for my savings goal?','What spending patterns do you see?'];
 
 function Chat() {
   const { state, recordTurn } = useFinance();
